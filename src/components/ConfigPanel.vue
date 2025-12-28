@@ -8,6 +8,7 @@ const props = defineProps({
     colorSelections: Object,
     activeSlot: String,
     currentTask: Object,
+    isMobile: Boolean,
 });
 
 const emit = defineEmits([
@@ -39,7 +40,7 @@ const handleImport = () => {
 </script>
 
 <template>
-    <main class="config-side">
+    <main class="config-side" :class="{ mobile: isMobile }">
         <header class="main-header">
             <div class="header-content">
                 <div class="title-section">
@@ -72,6 +73,7 @@ const handleImport = () => {
                                 d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"
                             />
                         </svg>
+                        <span v-if="!isMobile">Tareas</span>
                     </button>
 
                     <button
@@ -94,6 +96,7 @@ const handleImport = () => {
                             <polyline points="7 10 12 15 17 10" />
                             <line x1="12" y1="15" x2="12" y2="3" />
                         </svg>
+                        <span v-if="!isMobile">Exportar</span>
                     </button>
 
                     <button
@@ -116,13 +119,14 @@ const handleImport = () => {
                             <polyline points="17 8 12 3 7 8" />
                             <line x1="12" y1="3" x2="12" y2="15" />
                         </svg>
+                        <span v-if="!isMobile">Importar</span>
                     </button>
                 </div>
             </div>
 
             <div class="help-text" v-if="parsedColors.length === 0">
                 💡 Usa <code>{color}</code> o <code>{color:nombre}</code> en tu
-                prompt para crear slots de color
+                prompt
             </div>
         </header>
 
@@ -142,7 +146,19 @@ const handleImport = () => {
         />
 
         <div v-else class="no-selection">
-            <p>Selecciona un tab de color arriba</p>
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="48"
+                height="48"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+            >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+            </svg>
+            <p>Selecciona un color arriba</p>
         </div>
     </main>
 </template>
@@ -155,6 +171,12 @@ const handleImport = () => {
     padding: 40px;
     border-right: 1px solid var(--border-color);
     background: var(--bg-primary);
+    overflow-y: auto;
+}
+
+.config-side.mobile {
+    height: calc(100vh - 80px);
+    padding-bottom: 80px;
 }
 
 .main-header {
@@ -170,6 +192,7 @@ const handleImport = () => {
 
 .title-section {
     flex: 1;
+    min-width: 0;
 }
 
 .badge {
@@ -201,6 +224,7 @@ const handleImport = () => {
 .header-actions {
     display: flex;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .action-btn {
@@ -211,8 +235,12 @@ const handleImport = () => {
     cursor: pointer;
     display: flex;
     align-items: center;
+    gap: 6px;
     transition: all 0.2s;
     color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
 }
 
 .action-btn:hover {
@@ -228,6 +256,7 @@ const handleImport = () => {
     border-radius: 8px;
     font-size: 13px;
     color: var(--text-secondary);
+    line-height: 1.5;
 }
 
 .help-text code {
@@ -241,9 +270,21 @@ const handleImport = () => {
 .no-selection {
     flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 12px;
     color: var(--text-secondary);
     font-size: 14px;
+    padding: 40px;
+    text-align: center;
+}
+
+.no-selection svg {
+    opacity: 0.3;
+}
+
+.no-selection p {
+    font-weight: 500;
 }
 </style>

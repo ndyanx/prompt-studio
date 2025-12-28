@@ -6,11 +6,12 @@ const props = defineProps({
     finalPrompt: String,
     parsedColors: Array,
     colorSelections: Object,
+    isMobile: Boolean,
 });
 
 const emit = defineEmits(["update-prompt"]);
 
-const copyButtonText = ref("Copiar Prompt Final");
+const copyButtonText = ref("Copiar");
 const isEditing = ref(true);
 
 const promptStats = computed(() => {
@@ -38,9 +39,9 @@ const highlightedPrompt = computed(() => {
 const copyToClipboard = async () => {
     try {
         await navigator.clipboard.writeText(props.finalPrompt);
-        copyButtonText.value = "¡Copiado! ✓";
+        copyButtonText.value = "✓ Copiado";
         setTimeout(() => {
-            copyButtonText.value = "Copiar Prompt Final";
+            copyButtonText.value = "Copiar";
         }, 1200);
     } catch (err) {
         console.error("Error al copiar:", err);
@@ -49,7 +50,7 @@ const copyToClipboard = async () => {
 </script>
 
 <template>
-    <aside class="preview-side">
+    <aside class="preview-side" :class="{ mobile: isMobile }">
         <div class="preview-card">
             <div class="card-header">
                 <div class="card-tag">
@@ -65,20 +66,16 @@ const copyToClipboard = async () => {
                         class="toggle-mode"
                         :class="{ active: !isEditing }"
                     >
-                        👁 Vista Previa
+                        👁 Previa
                     </button>
                 </div>
 
                 <div class="stats">
                     <span class="stat-item"
-                        >{{ promptStats.characters }} chars</span
+                        >{{ promptStats.characters }}ch</span
                     >
-                    <span class="stat-item"
-                        >{{ promptStats.words }} palabras</span
-                    >
-                    <span class="stat-item"
-                        >{{ promptStats.colors }} colores</span
-                    >
+                    <span class="stat-item">{{ promptStats.words }}p</span>
+                    <span class="stat-item">{{ promptStats.colors }}c</span>
                 </div>
             </div>
 
@@ -90,23 +87,26 @@ const copyToClipboard = async () => {
                     class="prompt-editor"
                     placeholder="Escribe tu prompt aquí...
 
-Usa {color} para crear un slot de color genérico
-O {color:nombre} para darle un nombre personalizado
+Usa {color} o {color:nombre}
 
 Ejemplo:
-Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
+Gato {color:pelaje} con ojos {color:ojos}"
                 ></textarea>
 
                 <div v-else class="prompt-preview">
-                    <div class="preview-label">Con placeholders:</div>
-                    <div
-                        class="prompt-content"
-                        v-html="highlightedPrompt"
-                    ></div>
+                    <div class="preview-section">
+                        <div class="preview-label">Con placeholders:</div>
+                        <div
+                            class="prompt-content"
+                            v-html="highlightedPrompt"
+                        ></div>
+                    </div>
 
-                    <div class="preview-label final-label">Prompt final:</div>
-                    <div class="prompt-content final-content">
-                        {{ finalPrompt }}
+                    <div class="preview-section">
+                        <div class="preview-label">Final:</div>
+                        <div class="prompt-content final-content">
+                            {{ finalPrompt }}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -146,11 +146,18 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
     flex: 0 0 40%;
     background: var(--bg-secondary);
     padding: 40px;
+    overflow-y: auto;
+}
+
+.preview-side.mobile {
+    height: calc(100vh - 80px);
+    padding-bottom: 80px;
 }
 
 .preview-card {
     background: var(--card-bg);
     height: 100%;
+    min-height: 500px;
     border-radius: 20px;
     display: flex;
     flex-direction: column;
@@ -170,11 +177,12 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
 }
 
 .toggle-mode {
-    padding: 6px 12px;
-    border-radius: 6px;
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 8px;
     border: 1px solid var(--border-color);
     background: transparent;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
@@ -189,14 +197,14 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
 
 .stats {
     display: flex;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
 }
 
 .stat-item {
     font-size: 11px;
     color: var(--text-secondary);
-    padding: 4px 10px;
+    padding: 4px 8px;
     background: var(--bg-secondary);
     border-radius: 6px;
     font-weight: 600;
@@ -212,7 +220,7 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
 .prompt-editor {
     width: 100%;
     height: 100%;
-    min-height: 400px;
+    min-height: 300px;
     padding: 16px;
     border: 1px solid var(--border-color);
     border-radius: 12px;
@@ -220,7 +228,7 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
     color: var(--text-primary);
     font-size: 14px;
     line-height: 1.8;
-    font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+    font-family: "SF Mono", Monaco, monospace;
     resize: none;
     outline: none;
     transition: border-color 0.2s;
@@ -232,7 +240,16 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
 }
 
 .prompt-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.preview-section {
     padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
 }
 
 .preview-label {
@@ -241,28 +258,16 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 1px;
-    margin-bottom: 8px;
-}
-
-.final-label {
-    margin-top: 24px;
-    padding-top: 24px;
-    border-top: 1px solid var(--border-color);
+    margin-bottom: 12px;
 }
 
 .prompt-content {
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.8;
     color: var(--text-primary);
     white-space: pre-wrap;
+    word-break: break-word;
     font-family: "SF Mono", Monaco, monospace;
-}
-
-.final-content {
-    padding: 16px;
-    background: var(--bg-secondary);
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
 }
 
 .prompt-content :deep(.color-highlight) {
@@ -302,5 +307,15 @@ Generar un gato color {color:gato} sobre una mesa color {color:mesa}"
 
 .copy-btn:active {
     transform: translateY(0);
+}
+
+@media (max-width: 768px) {
+    .prompt-editor {
+        font-size: 13px;
+    }
+
+    .prompt-content {
+        font-size: 12px;
+    }
 }
 </style>

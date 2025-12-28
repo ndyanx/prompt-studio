@@ -83,25 +83,10 @@ button:active {
     transform: scale(0.98);
 }
 
-/* Animaciones de entrada */
-@keyframes fadeIn {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.fade-enter-active {
-    animation: fadeIn 0.3s ease-out;
-}
-
 /* Mejoras de accesibilidad */
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
@@ -117,7 +102,7 @@ input:focus-visible {
     }
 }
 
-/* Reducir movimiento para usuarios sensibles */
+/* Reducir movimiento */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -128,22 +113,204 @@ input:focus-visible {
     }
 }
 
-/* Estilos responsive */
+/* Responsive Design */
 @media (max-width: 1024px) {
     .app-wrapper {
-        flex-direction: column;
+        flex-direction: column !important;
     }
 
     .config-side,
     .preview-side {
-        flex: 1 !important;
+        flex: 1 1 auto !important;
         width: 100% !important;
+        max-width: 100% !important;
+        border-right: none !important;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .preview-side {
+        border-bottom: none;
     }
 }
 
 @media (max-width: 768px) {
+    body {
+        font-size: 14px;
+    }
+
     .config-side,
     .preview-side {
         padding: 20px !important;
+    }
+
+    /* Headers más compactos */
+    .main-header {
+        margin-bottom: 20px !important;
+    }
+
+    .task-name-input {
+        font-size: 22px !important;
+    }
+
+    /* Tabs más pequeños en mobile */
+    .tabs {
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
+        gap: 8px !important;
+    }
+
+    .tab-item {
+        padding: 12px !important;
+    }
+
+    .tab-label {
+        font-size: 9px !important;
+    }
+
+    .tab-val {
+        font-size: 12px !important;
+    }
+
+    /* Paleta más compacta */
+    .color-grid {
+        grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)) !important;
+        gap: 6px !important;
+    }
+
+    /* Botones de acción más grandes */
+    .action-btn {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
+
+    /* Panel de tareas full width */
+    .tasks-panel {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    .task-card {
+        padding: 12px !important;
+    }
+
+    /* Editor de prompt */
+    .prompt-editor {
+        font-size: 13px !important;
+        min-height: 300px !important;
+    }
+
+    /* Stats más compactos */
+    .stats {
+        gap: 8px !important;
+    }
+
+    .stat-item {
+        font-size: 10px !important;
+        padding: 3px 8px !important;
+    }
+
+    /* Botones más grandes en mobile */
+    .copy-btn {
+        padding: 14px !important;
+        font-size: 13px !important;
+    }
+
+    /* Theme toggle más grande */
+    .theme-toggle {
+        width: 48px !important;
+        height: 48px !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .config-side,
+    .preview-side {
+        padding: 16px !important;
+    }
+
+    /* Headers aún más compactos */
+    .header-content {
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .action-btn {
+        flex: 1;
+    }
+
+    /* Tabs en 2 columnas máximo */
+    .tabs {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+
+    /* Paleta más pequeña */
+    .color-grid {
+        grid-template-columns: repeat(auto-fill, minmax(32px, 1fr)) !important;
+        gap: 4px !important;
+    }
+
+    /* Task name input más pequeño */
+    .task-name-input {
+        font-size: 18px !important;
+    }
+
+    /* Toggle mode buttons en mobile */
+    .card-tag {
+        width: 100%;
+    }
+
+    .toggle-mode {
+        flex: 1;
+    }
+
+    /* Task actions stack en mobile */
+    .task-actions {
+        flex-wrap: wrap;
+    }
+
+    .task-btn {
+        font-size: 11px !important;
+    }
+
+    .load-btn {
+        flex: 1 1 100% !important;
+    }
+}
+
+/* Landscape mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+    .app-wrapper {
+        flex-direction: row !important;
+    }
+
+    .config-side,
+    .preview-side {
+        max-height: 100vh;
+        overflow-y: auto;
+    }
+}
+
+/* Touch improvements */
+@media (hover: none) and (pointer: coarse) {
+    /* Botones más grandes para touch */
+    button {
+        min-height: 44px;
+    }
+
+    /* Mejor área de touch para colores */
+    .color-btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+
+    /* Scroll más fácil */
+    .scroll-container,
+    .prompt-scroll,
+    .tasks-list {
+        -webkit-overflow-scrolling: touch;
     }
 }
