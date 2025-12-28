@@ -130,13 +130,14 @@ const handleImport = () => {
             </div>
         </header>
 
-        <ColorTabs
-            v-if="parsedColors.length > 0"
-            :parsed-colors="parsedColors"
-            :color-selections="colorSelections"
-            :active-slot="activeSlot"
-            @set-active="emit('set-active', $event)"
-        />
+        <div class="tabs-wrapper" v-if="parsedColors.length > 0">
+            <ColorTabs
+                :parsed-colors="parsedColors"
+                :color-selections="colorSelections"
+                :active-slot="activeSlot"
+                @set-active="emit('set-active', $event)"
+            />
+        </div>
 
         <ColorPalette
             v-if="activeSlot"
@@ -176,11 +177,12 @@ const handleImport = () => {
 
 .config-side.mobile {
     height: 100vh;
-    padding-bottom: 120px; /* Espacio para botón flotante + controles del sistema */
+    padding: 20px;
 }
 
 .main-header {
     margin-bottom: 30px;
+    flex-shrink: 0;
 }
 
 .header-content {
@@ -267,6 +269,14 @@ const handleImport = () => {
     color: var(--accent);
 }
 
+/* Wrapper para tabs con scroll si son muchos */
+.tabs-wrapper {
+    flex-shrink: 0;
+    margin-bottom: 20px;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
 .no-selection {
     flex: 1;
     display: flex;
@@ -286,5 +296,11 @@ const handleImport = () => {
 
 .no-selection p {
     font-weight: 500;
+}
+
+@media (max-width: 768px) {
+    .task-name-input {
+        font-size: 22px;
+    }
 }
 </style>

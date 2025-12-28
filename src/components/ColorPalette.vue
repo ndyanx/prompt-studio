@@ -64,6 +64,8 @@ const filteredColors = () => {
             <div v-if="filteredColors().length === 0" class="no-results">
                 No se encontraron colores
             </div>
+            <!-- Spacer para mobile -->
+            <div class="mobile-spacer"></div>
         </div>
     </div>
 </template>
@@ -170,5 +172,18 @@ const filteredColors = () => {
     padding: 40px 20px;
     color: var(--text-secondary);
     font-size: 14px;
+}
+
+/* Spacer para mobile - crea espacio extra al final */
+.mobile-spacer {
+    height: 0;
+    min-height: 0;
+}
+
+@media (max-width: 1024px) {
+    .mobile-spacer {
+        height: 140px; /* Espacio para botón flotante + controles del sistema */
+        min-height: 140px;
+    }
 }
 </style>

@@ -51,7 +51,7 @@ const copyToClipboard = async () => {
 
 <template>
     <aside class="preview-side" :class="{ mobile: isMobile }">
-        <div class="preview-card">
+        <div class="preview-content">
             <div class="card-header">
                 <div class="card-tag">
                     <button
@@ -137,6 +137,9 @@ Gato {color:pelaje} con ojos {color:ojos}"
                     {{ copyButtonText }}
                 </button>
             </div>
+
+            <!-- Spacer para mobile -->
+            <div class="mobile-spacer"></div>
         </div>
     </aside>
 </template>
@@ -151,19 +154,18 @@ Gato {color:pelaje} con ojos {color:ojos}"
 
 .preview-side.mobile {
     height: 100vh;
-    padding-bottom: 120px; /* Espacio para botón flotante + controles del sistema */
+    padding: 20px;
 }
 
-.preview-card {
+.preview-content {
     background: var(--card-bg);
-    height: 100%;
-    min-height: 500px;
     border-radius: 20px;
-    display: flex;
-    flex-direction: column;
     padding: 25px;
     box-shadow: var(--shadow-lg);
     border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 80px);
 }
 
 .card-header {
@@ -212,9 +214,10 @@ Gato {color:pelaje} con ojos {color:ojos}"
 
 .prompt-scroll {
     flex: 1;
-    overflow-y: auto;
     margin-bottom: 20px;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .prompt-editor {
@@ -239,10 +242,12 @@ Gato {color:pelaje} con ojos {color:ojos}"
     box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.1);
 }
 
+.prompt-editor,
 .prompt-preview {
+    flex: 1;
+    min-height: 300px; /* Establecer una altura mínima coherente para ambos */
     display: flex;
     flex-direction: column;
-    gap: 20px;
 }
 
 .preview-section {
@@ -307,6 +312,19 @@ Gato {color:pelaje} con ojos {color:ojos}"
 
 .copy-btn:active {
     transform: translateY(0);
+}
+
+/* Spacer para mobile - crea espacio extra al final */
+.mobile-spacer {
+    height: 0;
+    min-height: 0;
+}
+
+@media (max-width: 1024px) {
+    .mobile-spacer {
+        height: 140px;
+        min-height: 140px;
+    }
 }
 
 @media (max-width: 768px) {
