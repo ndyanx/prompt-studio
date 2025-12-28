@@ -2,7 +2,6 @@
 const props = defineProps({
     activeView: String,
 });
-
 const emit = defineEmits(["change-view"]);
 </script>
 
@@ -18,6 +17,7 @@ const emit = defineEmits(["change-view"]);
     >
         <svg
             v-if="activeView !== 'config'"
+            class="icon-gear"
             xmlns="http://www.w3.org/2000/svg"
             width="24"
             height="24"
@@ -33,7 +33,6 @@ const emit = defineEmits(["change-view"]);
             />
             <circle cx="12" cy="12" r="3" />
         </svg>
-
         <svg
             v-else
             xmlns="http://www.w3.org/2000/svg"
@@ -47,7 +46,6 @@ const emit = defineEmits(["change-view"]);
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <circle cx="12" cy="12" r="3" />
         </svg>
-
         <span>{{
             activeView === "config" ? "Vista Previa" : "Configurar"
         }}</span>
@@ -59,32 +57,42 @@ const emit = defineEmits(["change-view"]);
     position: fixed;
     bottom: 20px;
     right: 20px;
-    background: var(--card-bg, #fff);
-    border: 1px solid var(--border-color, #ccc);
-    padding: 12px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 16px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    z-index: 1000;
+    box-shadow: 0 4px 16px rgba(0, 113, 227, 0.4);
+    z-index: 999;
+    width: 56px;
+    height: 56px;
 }
 
 .toggle-view-btn:hover {
     transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 6px 20px rgba(0, 113, 227, 0.6);
+}
+
+.toggle-view-btn:active {
+    transform: scale(0.95);
 }
 
 .toggle-view-btn svg {
-    color: var(--text-primary, #333);
-    transition: transform 0.3s ease;
+    color: white;
+    transition: transform 0.4s ease;
 }
 
-/* El engranaje rotará al pasar el mouse */
-.toggle-view-btn:hover svg {
+.toggle-view-btn:hover .icon-gear {
     transform: rotate(90deg);
+}
+
+.toggle-view-btn:hover svg:not(.icon-gear) {
+    transform: none;
 }
 
 .toggle-view-btn span {

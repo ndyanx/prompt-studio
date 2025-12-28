@@ -150,8 +150,8 @@ Gato {color:pelaje} con ojos {color:ojos}"
 }
 
 .preview-side.mobile {
-    height: calc(100vh - 80px);
-    padding-bottom: 80px;
+    height: 100vh;
+    padding-bottom: 120px; /* Espacio para botón flotante + controles del sistema */
 }
 
 .preview-card {

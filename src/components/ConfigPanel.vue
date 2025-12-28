@@ -175,8 +175,8 @@ const handleImport = () => {
 }
 
 .config-side.mobile {
-    height: calc(100vh - 80px);
-    padding-bottom: 80px;
+    height: 100vh;
+    padding-bottom: 120px; /* Espacio para botón flotante + controles del sistema */
 }
 
 .main-header {
