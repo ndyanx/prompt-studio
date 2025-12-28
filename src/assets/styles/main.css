@@ -1,0 +1,149 @@
+:root {
+    --apple-bg: #f5f5f7;
+    --accent: #0071e3;
+    --accent-hover: #0077ed;
+    --white: #ffffff;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f5f7;
+    --card-bg: #ffffff;
+    --text-primary: #1d1d1f;
+    --text-secondary: #86868b;
+    --border-color: #e5e5e5;
+    --hover-bg: #f5f5f7;
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.dark-theme {
+    --apple-bg: #1c1c1e;
+    --accent: #0a84ff;
+    --accent-hover: #409cff;
+    --bg-primary: #000000;
+    --bg-secondary: #1c1c1e;
+    --card-bg: #1c1c1e;
+    --text-primary: #f5f5f7;
+    --text-secondary: #98989d;
+    --border-color: #38383a;
+    --hover-bg: #2c2c2e;
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+        Cantarell, "Helvetica Neue", sans-serif;
+    background: var(--bg-primary);
+    height: 100vh;
+    overflow: hidden;
+    color: var(--text-primary);
+    transition:
+        background-color 0.3s ease,
+        color 0.3s ease;
+}
+
+#app {
+    height: 100vh;
+}
+
+/* Scrollbar personalizado */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--text-secondary);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-secondary) transparent;
+}
+
+/* Transiciones globales */
+button {
+    font-family: inherit;
+}
+
+button:active {
+    transform: scale(0.98);
+}
+
+/* Animaciones de entrada */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-enter-active {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* Mejoras de accesibilidad */
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* Modo de contraste alto */
+@media (prefers-contrast: high) {
+    :root {
+        --border-color: #000000;
+    }
+
+    .dark-theme {
+        --border-color: #ffffff;
+    }
+}
+
+/* Reducir movimiento para usuarios sensibles */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Estilos responsive */
+@media (max-width: 1024px) {
+    .app-wrapper {
+        flex-direction: column;
+    }
+
+    .config-side,
+    .preview-side {
+        flex: 1 !important;
+        width: 100% !important;
+    }
+}
+
+@media (max-width: 768px) {
+    .config-side,
+    .preview-side {
+        padding: 20px !important;
+    }
+}
