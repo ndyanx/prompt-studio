@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import ColorTabs from "./ColorTabs.vue";
 import ColorPalette from "./ColorPalette.vue";
+import { usePromptManager } from "../composables/usePromptManager";
 
 const props = defineProps({
     parsedColors: Array,
@@ -17,10 +18,11 @@ const emit = defineEmits([
     "update-task-name",
     "show-tasks",
     "export-tasks",
-    "import-tasks",
 ]);
 
-const handleImport = () => {
+const { importTasks } = usePromptManager();
+
+const handleImport = async () => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".json";
@@ -28,7 +30,7 @@ const handleImport = () => {
         const file = e.target.files[0];
         if (file) {
             try {
-                const count = await emit("import-tasks", file);
+                const count = await importTasks(file);
                 alert(`${count} tareas importadas correctamente`);
             } catch (error) {
                 alert(error.message);

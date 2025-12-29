@@ -14,7 +14,7 @@ const promptManager = usePromptManager();
 const activeSlot = ref(null);
 const showTasks = ref(false);
 const isMobile = ref(false);
-const activeView = ref("config"); // 'config' o 'preview'
+const activeView = ref("config");
 
 // Detectar mobile
 const checkMobile = () => {
@@ -54,7 +54,6 @@ const showPreview = computed(
             @update-task-name="promptManager.updateTaskName"
             @show-tasks="showTasks = true"
             @export-tasks="promptManager.exportTasks"
-            @import-tasks="promptManager.importTasks"
         />
 
         <PreviewPanel
