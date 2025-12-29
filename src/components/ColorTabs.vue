@@ -32,6 +32,7 @@ const emit = defineEmits(["set-active"]);
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 12px;
+    margin-top: 3px;
     margin-bottom: 30px;
 }
 
