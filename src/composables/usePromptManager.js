@@ -54,6 +54,14 @@ export function usePromptManager() {
       index++;
     }
 
+    // LIMPIAR colores que ya no existen en el prompt
+    const validKeys = matches.map((m) => m.key);
+    Object.keys(colorSelections).forEach((key) => {
+      if (!validKeys.includes(key)) {
+        delete colorSelections[key];
+      }
+    });
+
     return matches;
   });
 
@@ -120,6 +128,13 @@ export function usePromptManager() {
   const loadTask = (task) => {
     currentTask.value = task;
     promptText.value = task.prompt;
+
+    // Limpiar colorSelections antes de cargar
+    Object.keys(colorSelections).forEach((key) => {
+      delete colorSelections[key];
+    });
+
+    // Cargar solo los colores válidos
     Object.assign(colorSelections, task.colors);
   };
 
@@ -128,7 +143,16 @@ export function usePromptManager() {
     if (!currentTask.value) return;
 
     currentTask.value.prompt = promptText.value;
-    currentTask.value.colors = { ...colorSelections };
+
+    // Guardar solo los colores que realmente existen en el prompt
+    const validColors = {};
+    parsedColors.value.forEach(({ key }) => {
+      if (colorSelections[key]) {
+        validColors[key] = colorSelections[key];
+      }
+    });
+
+    currentTask.value.colors = validColors;
     currentTask.value.updatedAt = new Date().toISOString();
 
     saveTasks();
