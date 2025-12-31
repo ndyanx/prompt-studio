@@ -744,9 +744,9 @@ const clearSearch = () => {
         padding-right: 20px;
     }
 
-    .tasks-grid {
+    /*.tasks-grid {
         grid-template-columns: 1fr;
-    }
+    }*/
 
     .toolbar-actions {
         width: 100%;
