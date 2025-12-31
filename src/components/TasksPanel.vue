@@ -545,7 +545,7 @@ const clearSearch = () => {
     overflow-y: auto;
     padding: 24px 32px;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 20px;
     align-content: start;
 }
