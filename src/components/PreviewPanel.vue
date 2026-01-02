@@ -102,12 +102,12 @@ Gato {color:pelaje} con ojos {color:ojos}"
                         ></div>
                     </div>
 
-                    <div class="preview-section">
+                    <!-- <div class="preview-section">
                         <div class="preview-label">Final:</div>
                         <div class="prompt-content final-content">
                             {{ finalPrompt }}
                         </div>
-                    </div>
+                    </div> -->
                 </div>
             </div>
 

@@ -17,7 +17,6 @@ const emit = defineEmits(["change-view"]);
     >
         <svg
             v-if="activeView !== 'config'"
-            class="icon-gear"
             xmlns="http://www.w3.org/2000/svg"
             width="24"
             height="24"
@@ -25,13 +24,10 @@ const emit = defineEmits(["change-view"]);
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
         >
             <path
-                d="M12.22 2h-.44a2 2 0 0 0-2 2 2 2 0 0 1-2 2 2 2 0 0 0-2 2 2 2 0 0 1-2 2 2 2 0 0 0-2 2v.44a2 2 0 0 0 2 2 2 2 0 0 1 2 2 2 2 0 0 0 2 2 2 2 0 0 1 2 2 2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2 2 2 0 0 1 2-2 2 2 0 0 0 2-2 2 2 0 0 1 2-2 2 2 0 0 0 2-2v-.44a2 2 0 0 0-2-2 2 2 0 0 1-2-2 2 2 0 0 0-2-2 2 2 0 0 1-2-2 2 2 0 0 0-2-2z"
-            />
-            <circle cx="12" cy="12" r="3" />
+                d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
+            ></path>
         </svg>
         <svg
             v-else
@@ -87,13 +83,13 @@ const emit = defineEmits(["change-view"]);
     transition: transform 0.4s ease;
 }
 
-.toggle-view-btn:hover .icon-gear {
+/*.toggle-view-btn:hover .icon-gear {
     transform: rotate(90deg);
 }
 
 .toggle-view-btn:hover svg:not(.icon-gear) {
     transform: none;
-}
+}*/
 
 .toggle-view-btn span {
     display: none;
