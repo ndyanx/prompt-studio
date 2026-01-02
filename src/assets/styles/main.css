@@ -213,12 +213,6 @@ textarea:focus-visible {
         padding: 14px !important;
         font-size: 13px !important;
     }
-
-    /* Theme toggle más grande */
-    .theme-toggle {
-        width: 48px !important;
-        height: 48px !important;
-    }
 }
 
 @media (max-width: 480px) {
@@ -289,15 +283,15 @@ textarea:focus-visible {
 
     .config-side,
     .preview-side {
-        max-height: 100vh;
+        max-height: calc(100vh - 60px);
         overflow-y: auto;
     }
 }
 
 /* Touch improvements */
 @media (hover: none) and (pointer: coarse) {
-    /* Botones más grandes para touch */
-    button {
+    /* Botones más grandes para touch - excepto switches especiales */
+    button:not(.vt-switch):not(.vt-switch *) {
         min-height: 44px;
     }
 

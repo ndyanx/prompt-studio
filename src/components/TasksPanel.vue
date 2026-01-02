@@ -16,6 +16,9 @@ const emit = defineEmits([
 
 const searchQuery = ref("");
 const sortBy = ref("updated"); // 'updated', 'created', 'name', 'colors'
+const showDeleteModal = ref(false);
+const taskToDelete = ref(null);
+const deleteConfirmText = ref("");
 
 const formatDate = (timestamp) => {
     const date = new Date(timestamp);
@@ -77,6 +80,29 @@ const filteredAndSortedTasks = computed(() => {
 const clearSearch = () => {
     searchQuery.value = "";
 };
+
+const openDeleteModal = (task) => {
+    taskToDelete.value = task;
+    showDeleteModal.value = true;
+    deleteConfirmText.value = "";
+};
+
+const closeDeleteModal = () => {
+    showDeleteModal.value = false;
+    taskToDelete.value = null;
+    deleteConfirmText.value = "";
+};
+
+const confirmDelete = () => {
+    if (deleteConfirmText.value === "eliminar") {
+        emit("delete-task", taskToDelete.value.id);
+        closeDeleteModal();
+    }
+};
+
+const isDeleteEnabled = computed(() => {
+    return deleteConfirmText.value === "eliminar";
+});
 </script>
 
 <template>
@@ -241,7 +267,7 @@ const clearSearch = () => {
                             </button>
 
                             <button
-                                @click="emit('delete-task', task.id)"
+                                @click="openDeleteModal(task)"
                                 class="icon-btn delete-btn"
                                 :disabled="tasks.length === 1"
                                 title="Eliminar"
@@ -341,6 +367,67 @@ const clearSearch = () => {
                 </div>
             </div>
         </div>
+
+        <!-- Modal de confirmación de eliminación -->
+        <Transition name="delete-modal">
+            <div
+                v-if="showDeleteModal"
+                class="delete-modal-overlay"
+                @click="closeDeleteModal"
+            >
+                <div class="delete-modal" @click.stop>
+                    <div class="delete-modal-icon">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="48"
+                            height="48"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="15" y1="9" x2="9" y2="15" />
+                            <line x1="9" y1="9" x2="15" y2="15" />
+                        </svg>
+                    </div>
+
+                    <h3 class="delete-modal-title">¿Eliminar tarea?</h3>
+                    <p class="delete-modal-description">
+                        Estás por eliminar la tarea
+                        <strong>"{{ taskToDelete?.name }}"</strong>. Esta acción
+                        no se puede deshacer.
+                    </p>
+
+                    <div class="delete-modal-input-group">
+                        <label for="delete-confirm" class="delete-modal-label">
+                            Escribe <strong>eliminar</strong> para confirmar:
+                        </label>
+                        <input
+                            id="delete-confirm"
+                            v-model="deleteConfirmText"
+                            type="text"
+                            class="delete-modal-input"
+                            placeholder="eliminar"
+                            @keyup.enter="isDeleteEnabled && confirmDelete()"
+                        />
+                    </div>
+
+                    <div class="delete-modal-actions">
+                        <button @click="closeDeleteModal" class="cancel-btn">
+                            Cancelar
+                        </button>
+                        <button
+                            @click="confirmDelete"
+                            :disabled="!isDeleteEnabled"
+                            class="confirm-delete-btn"
+                        >
+                            Eliminar tarea
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Transition>
     </div>
 </template>
 
@@ -656,7 +743,7 @@ const clearSearch = () => {
     line-height: 1.6;
     color: var(--text-secondary);
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -731,6 +818,180 @@ const clearSearch = () => {
     background: var(--accent-hover);
 }
 
+/* Modal de confirmación de eliminación */
+.delete-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    animation: fadeIn 0.2s ease;
+}
+
+.delete-modal {
+    background: var(--card-bg);
+    border-radius: 20px;
+    padding: 32px;
+    max-width: 480px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    animation: slideUp 0.3s ease;
+}
+
+.delete-modal-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(255, 59, 48, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+}
+
+.delete-modal-icon svg {
+    color: #ff3b30;
+}
+
+.delete-modal-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.delete-modal-description {
+    font-size: 15px;
+    color: var(--text-secondary);
+    text-align: center;
+    line-height: 1.6;
+    margin-bottom: 24px;
+}
+
+.delete-modal-description strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.delete-modal-input-group {
+    margin-bottom: 24px;
+}
+
+.delete-modal-label {
+    display: block;
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    text-align: center;
+}
+
+.delete-modal-label strong {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-family: "SF Mono", Monaco, monospace;
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.delete-modal-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 15px;
+    font-family: "SF Mono", Monaco, monospace;
+    text-align: center;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.delete-modal-input:focus {
+    border-color: #ff3b30;
+    box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.1);
+}
+
+.delete-modal-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.delete-modal-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.cancel-btn,
+.confirm-delete-btn {
+    flex: 1;
+    padding: 14px 20px;
+    border: none;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cancel-btn {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.cancel-btn:hover {
+    background: var(--hover-bg);
+}
+
+.confirm-delete-btn {
+    background: #ff3b30;
+    color: white;
+}
+
+.confirm-delete-btn:hover:not(:disabled) {
+    background: #ff453a;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.3);
+}
+
+.confirm-delete-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Transiciones del modal de eliminación */
+.delete-modal-enter-active,
+.delete-modal-leave-active {
+    transition: all 0.3s ease;
+}
+
+.delete-modal-enter-active .delete-modal,
+.delete-modal-leave-active .delete-modal {
+    transition: all 0.3s ease;
+}
+
+.delete-modal-enter-from,
+.delete-modal-leave-to {
+    opacity: 0;
+}
+
+.delete-modal-enter-from .delete-modal {
+    transform: scale(0.9) translateY(20px);
+    opacity: 0;
+}
+
+.delete-modal-leave-to .delete-modal {
+    transform: scale(0.9) translateY(20px);
+    opacity: 0;
+}
+
 @media (max-width: 768px) {
     .modal-container {
         max-height: 95vh;
@@ -744,16 +1005,24 @@ const clearSearch = () => {
         padding-right: 20px;
     }
 
-    /*.tasks-grid {
-        grid-template-columns: 1fr;
-    }*/
-
     .toolbar-actions {
         width: 100%;
     }
 
     .sort-select {
         flex: 1;
+    }
+
+    .delete-modal {
+        padding: 24px;
+    }
+
+    .delete-modal-title {
+        font-size: 20px;
+    }
+
+    .delete-modal-description {
+        font-size: 14px;
     }
 }
 </style>
