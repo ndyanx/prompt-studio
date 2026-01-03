@@ -45,6 +45,10 @@ const getColorCount = (task) => {
     return Object.keys(task.colors).length;
 };
 
+const getDuplicateCount = (taskName) => {
+    return props.tasks.filter((t) => t.name.trim() === taskName.trim()).length;
+};
+
 const filteredAndSortedTasks = computed(() => {
     let result = [...props.tasks];
 
@@ -94,14 +98,14 @@ const closeDeleteModal = () => {
 };
 
 const confirmDelete = () => {
-    if (deleteConfirmText.value === "eliminar") {
+    if (deleteConfirmText.value.toLowerCase() === "eliminar") {
         emit("delete-task", taskToDelete.value.id);
         closeDeleteModal();
     }
 };
 
 const isDeleteEnabled = computed(() => {
-    return deleteConfirmText.value === "eliminar";
+    return deleteConfirmText.value.toLowerCase() === "eliminar";
 });
 </script>
 
@@ -208,7 +212,16 @@ const isDeleteEnabled = computed(() => {
                     <!-- Card Header -->
                     <div class="card-header">
                         <div class="card-title">
-                            <h3>{{ task.name }}</h3>
+                            <h3>
+                                {{ task.name }}
+                                <span
+                                    v-if="getDuplicateCount(task.name) > 1"
+                                    class="duplicate-badge"
+                                    :title="`Existen ${getDuplicateCount(task.name)} tareas con este nombre`"
+                                >
+                                    ×{{ getDuplicateCount(task.name) }}
+                                </span>
+                            </h3>
                             <span
                                 class="badge"
                                 v-if="currentTask?.id === task.id"
@@ -681,6 +694,29 @@ const isDeleteEnabled = computed(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.duplicate-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 6px;
+    background: rgba(255, 149, 0, 0.15);
+    color: #ff9500;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 149, 0, 0.3);
+    flex-shrink: 0;
+}
+
+.dark-theme .duplicate-badge {
+    background: rgba(255, 159, 10, 0.2);
+    color: #ff9f0a;
+    border-color: rgba(255, 159, 10, 0.4);
 }
 
 .badge {

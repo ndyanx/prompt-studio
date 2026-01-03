@@ -53,6 +53,7 @@ const showPreview = computed(
                 :color-selections="promptManager.colorSelections"
                 :active-slot="activeSlot"
                 :current-task="promptManager.currentTask.value"
+                :all-tasks="promptManager.tasks.value"
                 :is-mobile="isMobile"
                 @set-active="activeSlot = $event"
                 @update-color="promptManager.updateColor"

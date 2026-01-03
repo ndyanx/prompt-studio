@@ -10,6 +10,7 @@ const props = defineProps({
     activeSlot: String,
     currentTask: Object,
     isMobile: Boolean,
+    allTasks: Array,
 });
 
 const emit = defineEmits([
@@ -39,6 +40,14 @@ const handleImport = async () => {
     };
     input.click();
 };
+
+const duplicateCount = computed(() => {
+    if (!props.currentTask || !props.allTasks) return 0;
+    const taskName = props.currentTask.name.trim();
+    return props.allTasks.filter((t) => t.name.trim() === taskName).length;
+});
+
+const hasDuplicates = computed(() => duplicateCount.value > 1);
 </script>
 
 <template>
@@ -47,13 +56,42 @@ const handleImport = async () => {
             <div class="header-content">
                 <div class="title-section">
                     <span class="badge">Dynamic Prompt Editor</span>
-                    <input
-                        v-if="currentTask"
-                        :value="currentTask.name"
-                        @input="emit('update-task-name', $event.target.value)"
-                        class="task-name-input"
-                        placeholder="Nombre de la tarea"
-                    />
+                    <div class="task-name-wrapper">
+                        <input
+                            v-if="currentTask"
+                            :value="currentTask.name"
+                            @input="
+                                emit('update-task-name', $event.target.value)
+                            "
+                            class="task-name-input"
+                            placeholder="Nombre de la tarea"
+                        />
+                        <span
+                            v-if="hasDuplicates"
+                            class="duplicate-warning"
+                            :title="`Existen ${duplicateCount} tareas con este nombre`"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                                />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                            ×{{ duplicateCount }}
+                        </span>
+                    </div>
+                    <p v-if="hasDuplicates" class="duplicate-message">
+                        Ya existen {{ duplicateCount }} tareas con este nombre
+                    </p>
                 </div>
 
                 <div class="header-actions">
@@ -208,6 +246,13 @@ const handleImport = async () => {
     margin-bottom: 8px;
 }
 
+.task-name-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
+
 .task-name-input {
     font-size: 28px;
     font-weight: 600;
@@ -219,10 +264,63 @@ const handleImport = async () => {
     padding: 4px 0;
     border-bottom: 2px solid transparent;
     transition: border-color 0.2s;
+    flex: 1;
+    min-width: 0;
 }
 
 .task-name-input:focus {
     border-bottom-color: var(--accent);
+}
+
+.duplicate-warning {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: rgba(255, 149, 0, 0.15);
+    color: #ff9500;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 149, 0, 0.3);
+    flex-shrink: 0;
+    cursor: help;
+    transition: all 0.2s;
+}
+
+.duplicate-warning:hover {
+    background: rgba(255, 149, 0, 0.25);
+}
+
+.dark-theme .duplicate-warning {
+    background: rgba(255, 159, 10, 0.2);
+    color: #ff9f0a;
+    border-color: rgba(255, 159, 10, 0.4);
+}
+
+.duplicate-message {
+    font-size: 12px;
+    color: #ff9500;
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    animation: slideDown 0.3s ease;
+}
+
+.dark-theme .duplicate-message {
+    color: #ff9f0a;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .header-actions {
@@ -303,6 +401,15 @@ const handleImport = async () => {
 @media (max-width: 768px) {
     .task-name-input {
         font-size: 22px;
+    }
+
+    .duplicate-warning {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+
+    .duplicate-message {
+        font-size: 11px;
     }
 }
 </style>
