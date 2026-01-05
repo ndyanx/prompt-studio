@@ -16,6 +16,7 @@ const emit = defineEmits([
 
 const searchQuery = ref("");
 const sortBy = ref("updated"); // 'updated', 'created', 'name', 'colors'
+const viewMode = ref("grid"); // 'grid' or 'list'
 const showDeleteModal = ref(false);
 const taskToDelete = ref(null);
 const deleteConfirmText = ref("");
@@ -176,6 +177,53 @@ const isDeleteEnabled = computed(() => {
                 </div>
 
                 <div class="toolbar-actions">
+                    <div class="view-toggle">
+                        <button
+                            @click="viewMode = 'grid'"
+                            :class="{ active: viewMode === 'grid' }"
+                            class="view-btn"
+                            title="Vista cuadrícula"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <rect x="3" y="3" width="7" height="7" />
+                                <rect x="14" y="3" width="7" height="7" />
+                                <rect x="14" y="14" width="7" height="7" />
+                                <rect x="3" y="14" width="7" height="7" />
+                            </svg>
+                        </button>
+                        <button
+                            @click="viewMode = 'list'"
+                            :class="{ active: viewMode === 'list' }"
+                            class="view-btn"
+                            title="Vista lista"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <line x1="8" y1="6" x2="21" y2="6" />
+                                <line x1="8" y1="12" x2="21" y2="12" />
+                                <line x1="8" y1="18" x2="21" y2="18" />
+                                <line x1="3" y1="6" x2="3.01" y2="6" />
+                                <line x1="3" y1="12" x2="3.01" y2="12" />
+                                <line x1="3" y1="18" x2="3.01" y2="18" />
+                            </svg>
+                        </button>
+                    </div>
+
                     <select v-model="sortBy" class="sort-select">
                         <option value="updated">Más reciente</option>
                         <option value="created">Más antiguo</option>
@@ -202,7 +250,10 @@ const isDeleteEnabled = computed(() => {
             </div>
 
             <!-- Tasks Grid -->
-            <div class="tasks-grid">
+            <div
+                class="tasks-grid"
+                :class="{ 'list-view': viewMode === 'list' }"
+            >
                 <div
                     v-for="task in filteredAndSortedTasks"
                     :key="task.id"
@@ -601,6 +652,37 @@ const isDeleteEnabled = computed(() => {
     align-items: center;
 }
 
+.view-toggle {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 4px;
+}
+
+.view-btn {
+    padding: 8px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+.view-btn:hover {
+    color: var(--text-primary);
+}
+
+.view-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
 .sort-select {
     padding: 10px 16px;
     border: 1px solid var(--border-color);
@@ -650,6 +732,11 @@ const isDeleteEnabled = computed(() => {
     align-content: start;
 }
 
+.tasks-grid.list-view {
+    grid-template-columns: 1fr;
+    gap: 12px;
+}
+
 .task-card {
     background: var(--bg-secondary);
     border: 2px solid transparent;
@@ -660,6 +747,40 @@ const isDeleteEnabled = computed(() => {
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+.list-view .task-card {
+    flex-direction: row;
+    align-items: center;
+    gap: 24px;
+    padding: 16px 20px;
+}
+
+.list-view .card-header {
+    flex: 0 0 auto;
+    min-width: 280px;
+}
+
+.list-view .card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.list-view .card-footer {
+    flex: 0 0 auto;
+    border-top: none;
+    padding-top: 0;
+}
+
+.list-view .card-title h3 {
+    white-space: normal;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.list-view .prompt-preview {
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
 }
 
 .task-card:hover {
@@ -780,6 +901,7 @@ const isDeleteEnabled = computed(() => {
     color: var(--text-secondary);
     display: -webkit-box;
     line-clamp: 3;
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -1043,10 +1165,25 @@ const isDeleteEnabled = computed(() => {
 
     .toolbar-actions {
         width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .view-toggle {
+        order: -1;
     }
 
     .sort-select {
         flex: 1;
+    }
+
+    .list-view .task-card {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 16px;
+    }
+
+    .list-view .card-header {
+        min-width: auto;
     }
 
     .delete-modal {
