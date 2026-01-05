@@ -16,7 +16,7 @@ const emit = defineEmits([
 
 const searchQuery = ref("");
 const sortBy = ref("updated"); // 'updated', 'created', 'name', 'colors'
-const viewMode = ref("grid"); // 'grid' or 'list'
+const viewMode = ref("list"); // 'grid' or 'list'
 const showDeleteModal = ref(false);
 const taskToDelete = ref(null);
 const deleteConfirmText = ref("");
