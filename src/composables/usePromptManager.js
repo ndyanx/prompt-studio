@@ -1,27 +1,30 @@
 import { ref, reactive, computed, watch, onMounted } from "vue";
+import { db, Task, initDB } from "./db";
 
-const STORAGE_KEY = "prompt-studio-tasks";
-
-// Estado global
 const tasks = ref([]);
 const currentTask = ref(null);
 const promptText = ref("");
 const colorSelections = reactive({});
 
 let initialized = false;
+let saveTimeout = null;
 
 export function usePromptManager() {
-  onMounted(() => {
+  onMounted(async () => {
     if (!initialized) {
       initialized = true;
-      loadTasks();
+      await initDB();
+      await loadTasks();
 
-      // Auto-guardar tarea actual
       watch(
         [promptText, colorSelections],
         () => {
           if (currentTask.value) {
-            saveCurrentTask();
+            // Debounce: espera 500ms sin cambios antes de guardar
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+              saveCurrentTask();
+            }, 500);
           }
         },
         { deep: true },
@@ -29,7 +32,6 @@ export function usePromptManager() {
     }
   });
 
-  // Parsear el prompt para encontrar placeholders {color} o {color:nombre}
   const parsedColors = computed(() => {
     const regex = /\{color(?::([^}]+))?\}/g;
     const matches = [];
@@ -46,7 +48,6 @@ export function usePromptManager() {
         index,
       });
 
-      // Inicializar color si no existe
       if (!colorSelections[key]) {
         colorSelections[key] = "SlateGray";
       }
@@ -54,7 +55,6 @@ export function usePromptManager() {
       index++;
     }
 
-    // LIMPIAR colores que ya no existen en el prompt
     const validKeys = matches.map((m) => m.key);
     Object.keys(colorSelections).forEach((key) => {
       if (!validKeys.includes(key)) {
@@ -65,7 +65,6 @@ export function usePromptManager() {
     return matches;
   });
 
-  // Generar el prompt final con colores aplicados
   const finalPrompt = computed(() => {
     let result = promptText.value;
     parsedColors.value.forEach(({ placeholder, key }) => {
@@ -74,160 +73,189 @@ export function usePromptManager() {
     return result;
   });
 
-  // Cargar tareas desde localStorage
-  const loadTasks = () => {
+  const loadTasks = async () => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        tasks.value = JSON.parse(stored);
+      const allTasks = await db.tasks.orderBy("updatedAt").reverse().toArray();
 
-        // Cargar última tarea o crear una nueva
-        if (tasks.value.length > 0) {
-          loadTask(tasks.value[0]);
-        } else {
-          createNewTask();
-        }
+      tasks.value = allTasks;
+
+      if (tasks.value.length > 0) {
+        await loadTask(tasks.value[0]);
       } else {
-        createNewTask();
+        await createNewTask();
       }
     } catch (error) {
       console.error("Error loading tasks:", error);
-      createNewTask();
+      await createNewTask();
     }
   };
 
-  // Guardar tareas en localStorage
-  const saveTasks = () => {
+  const createNewTask = async () => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks.value));
+      const newTask = new Task({
+        name: "Nueva Tarea",
+        prompt:
+          "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.",
+      });
+
+      await db.tasks.add(newTask);
+      tasks.value.unshift(newTask);
+      await loadTask(newTask);
+
+      return newTask;
     } catch (error) {
-      console.error("Error saving tasks:", error);
+      console.error("Error creating task:", error);
+      throw error;
     }
   };
 
-  // Crear nueva tarea
-  const createNewTask = () => {
-    const newTask = {
-      id: Date.now(),
-      name: "Nueva Tarea",
-      prompt:
-        "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.",
-      colors: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    tasks.value.unshift(newTask);
-    loadTask(newTask);
-    saveTasks();
-
-    return newTask;
-  };
-
-  // Cargar una tarea
-  const loadTask = (task) => {
+  const loadTask = async (task) => {
     currentTask.value = task;
     promptText.value = task.prompt;
 
-    // Limpiar colorSelections antes de cargar
     Object.keys(colorSelections).forEach((key) => {
       delete colorSelections[key];
     });
 
-    // Cargar solo los colores válidos
     Object.assign(colorSelections, task.colors);
   };
 
-  // Guardar tarea actual
-  const saveCurrentTask = () => {
+  const saveCurrentTask = async () => {
     if (!currentTask.value) return;
 
-    currentTask.value.prompt = promptText.value;
+    try {
+      currentTask.value.prompt = promptText.value;
 
-    // Guardar solo los colores que realmente existen en el prompt
-    const validColors = {};
-    parsedColors.value.forEach(({ key }) => {
-      if (colorSelections[key]) {
-        validColors[key] = colorSelections[key];
+      const validColors = {};
+      parsedColors.value.forEach(({ key }) => {
+        if (colorSelections[key]) {
+          validColors[key] = colorSelections[key];
+        }
+      });
+
+      currentTask.value.colors = validColors;
+      currentTask.value.updatedAt = new Date().toISOString();
+
+      // Crear un objeto plano sin reactividad de Vue
+      const taskToSave = {
+        id: currentTask.value.id,
+        name: currentTask.value.name,
+        prompt: currentTask.value.prompt,
+        colors: { ...currentTask.value.colors },
+        createdAt: currentTask.value.createdAt,
+        updatedAt: currentTask.value.updatedAt,
+      };
+
+      await db.tasks.put(taskToSave);
+
+      const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
+      if (index !== -1) {
+        tasks.value[index] = { ...currentTask.value };
       }
-    });
-
-    currentTask.value.colors = validColors;
-    currentTask.value.updatedAt = new Date().toISOString();
-
-    saveTasks();
+    } catch (error) {
+      console.error("Error saving task:", error);
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+      console.error("Task data:", currentTask.value);
+    }
   };
 
-  // Actualizar nombre de tarea
-  const updateTaskName = (name) => {
-    if (currentTask.value) {
+  const updateTaskName = async (name) => {
+    if (!currentTask.value) return;
+
+    try {
       currentTask.value.name = name;
-      saveTasks();
-    }
-  };
+      currentTask.value.updatedAt = new Date().toISOString();
 
-  // Eliminar tarea
-  const deleteTask = (taskId) => {
-    const index = tasks.value.findIndex((t) => t.id === taskId);
-    if (index === -1) return;
+      const taskToSave = {
+        id: currentTask.value.id,
+        name: currentTask.value.name,
+        prompt: currentTask.value.prompt,
+        colors: { ...currentTask.value.colors },
+        createdAt: currentTask.value.createdAt,
+        updatedAt: currentTask.value.updatedAt,
+      };
 
-    tasks.value.splice(index, 1);
+      await db.tasks.put(taskToSave);
 
-    // Si eliminamos la tarea actual, cargar otra
-    if (currentTask.value?.id === taskId) {
-      if (tasks.value.length > 0) {
-        loadTask(tasks.value[0]);
-      } else {
-        createNewTask();
+      const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
+      if (index !== -1) {
+        tasks.value[index] = { ...currentTask.value };
       }
+    } catch (error) {
+      console.error("Error updating task name:", error);
     }
-
-    saveTasks();
   };
 
-  // Duplicar tarea
-  const duplicateTask = (task) => {
-    const duplicate = {
-      id: Date.now(),
-      name: `${task.name} (copia)`,
-      prompt: task.prompt,
-      colors: { ...task.colors },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+  const deleteTask = async (taskId) => {
+    try {
+      await db.tasks.delete(taskId);
 
-    tasks.value.unshift(duplicate);
-    saveTasks();
+      const index = tasks.value.findIndex((t) => t.id === taskId);
+      if (index !== -1) {
+        tasks.value.splice(index, 1);
+      }
 
-    return duplicate;
+      if (currentTask.value?.id === taskId) {
+        if (tasks.value.length > 0) {
+          await loadTask(tasks.value[0]);
+        } else {
+          await createNewTask();
+        }
+      }
+    } catch (error) {
+      console.error("Error deleting task:", error);
+    }
   };
 
-  // Exportar tareas a JSON
-  const exportTasks = () => {
-    const data = {
-      version: "2.0.0",
-      exportedAt: new Date().toISOString(),
-      tasks: tasks.value,
-    };
+  const duplicateTask = async (task) => {
+    try {
+      const duplicate = new Task({
+        name: `${task.name} (copia)`,
+        prompt: task.prompt,
+        colors: { ...task.colors },
+      });
 
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `prompt-tasks-${Date.now()}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      await db.tasks.add(duplicate);
+      tasks.value.unshift(duplicate);
+
+      return duplicate;
+    } catch (error) {
+      console.error("Error duplicating task:", error);
+      throw error;
+    }
   };
 
-  // Importar tareas desde JSON
+  const exportTasks = async () => {
+    try {
+      const allTasks = await db.tasks.toArray();
+
+      const data = {
+        version: "2.0.0",
+        exportedAt: new Date().toISOString(),
+        tasks: allTasks,
+      };
+
+      const json = JSON.stringify(data, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `prompt-tasks-${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error exporting tasks:", error);
+    }
+  };
+
   const importTasks = async (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
 
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
           const data = JSON.parse(e.target.result);
 
@@ -236,17 +264,30 @@ export function usePromptManager() {
             return;
           }
 
-          // Agregar tareas importadas
-          data.tasks.forEach((task) => {
-            // Asignar nuevo ID para evitar duplicados
-            task.id = Date.now() + Math.random();
-            tasks.value.push(task);
+          // Generar IDs únicos secuencialmente
+          const baseId = Date.now();
+          const newTasks = data.tasks.map((task, index) => {
+            return {
+              id: baseId + index, // IDs secuenciales garantizados únicos
+              name: task.name || "Tarea importada",
+              prompt: task.prompt || "",
+              colors: task.colors || {},
+              createdAt: task.createdAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
           });
 
-          saveTasks();
-          resolve(data.tasks.length);
+          // Usar bulkAdd con nuevos IDs
+          await db.tasks.bulkAdd(newTasks);
+
+          // Agregar a lista local
+          tasks.value.push(...newTasks);
+
+          console.log(`✅ ${newTasks.length} tareas importadas`);
+          resolve(newTasks.length);
         } catch (error) {
-          reject(new Error("Error al leer el archivo JSON"));
+          console.error("Error importing tasks:", error);
+          reject(new Error(`Error al importar: ${error.message}`));
         }
       };
 
@@ -255,21 +296,17 @@ export function usePromptManager() {
     });
   };
 
-  // Actualizar color de un slot
   const updateColor = (key, color) => {
     colorSelections[key] = color;
   };
 
   return {
-    // Estado
     tasks,
     currentTask,
     promptText,
     colorSelections,
     parsedColors,
     finalPrompt,
-
-    // Métodos
     createNewTask,
     loadTask,
     saveCurrentTask,
