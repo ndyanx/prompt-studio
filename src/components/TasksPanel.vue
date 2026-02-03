@@ -69,7 +69,7 @@ const filteredAndSortedTasks = computed(() => {
             case "updated":
                 return new Date(b.updatedAt) - new Date(a.updatedAt);
             case "created":
-                return new Date(b.createdAt) - new Date(a.createdAt);
+                return new Date(a.createdAt) - new Date(b.createdAt);
             case "name":
                 return a.name.localeCompare(b.name);
             case "colors":

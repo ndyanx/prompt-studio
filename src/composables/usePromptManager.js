@@ -273,7 +273,7 @@ export function usePromptManager() {
               prompt: task.prompt || "",
               colors: task.colors || {},
               createdAt: task.createdAt || new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
+              updatedAt: task.updatedAt || new Date().toISOString(),
             };
           });
 
