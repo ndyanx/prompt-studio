@@ -15,6 +15,8 @@ export class Task {
       data.prompt ||
       "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.";
     this.colors = data.colors || {};
+    this.url_post = data.url_post || "";
+    this.url_video = data.url_video || "";
     this.createdAt = data.createdAt || new Date().toISOString();
     this.updatedAt = data.updatedAt || new Date().toISOString();
   }

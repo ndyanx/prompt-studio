@@ -65,17 +65,20 @@ const filteredColors = () => {
                 No se encontraron colores
             </div>
             <!-- Spacer para mobile -->
-            <div class="mobile-spacer"></div>
+            <!-- <div class="mobile-spacer"></div> -->
         </div>
     </div>
 </template>
 
 <style scoped>
 .palette-section {
-    flex: 1;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    min-height: 400px;
+    max-height: 600px;
+    overflow: hidden;
+    margin-bottom: 20px;
 }
 
 .palette-bar {
@@ -85,6 +88,7 @@ const filteredColors = () => {
     font-weight: 600;
     margin-bottom: 15px;
     color: var(--text-primary);
+    flex-shrink: 0;
 }
 
 .search-box {
@@ -97,6 +101,7 @@ const filteredColors = () => {
     border-radius: 10px;
     margin-bottom: 15px;
     transition: all 0.2s;
+    flex-shrink: 0;
 }
 
 .search-box:focus-within {
@@ -125,13 +130,16 @@ const filteredColors = () => {
 .scroll-container {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding-right: 10px;
+    min-height: 0;
 }
 
 .color-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
     gap: 8px;
+    padding-bottom: 10px;
 }
 
 .color-btn {
@@ -175,15 +183,25 @@ const filteredColors = () => {
 }
 
 /* Spacer para mobile - crea espacio extra al final */
-.mobile-spacer {
+/*.mobile-spacer {
     height: 0;
     min-height: 0;
-}
+}*/
 
 @media (max-width: 1024px) {
-    .mobile-spacer {
-        height: 140px; /* Espacio para botón flotante + controles del sistema */
-        min-height: 140px;
+    .palette-section {
+        overflow: visible;
+        max-height: none;
+        margin-bottom: 0;
     }
+
+    .scroll-container {
+        overflow-y: visible;
+    }
+
+    /*.mobile-spacer {
+        height: 140px; /* Espacio para botón flotante + controles del sistema
+        min-height: 140px;
+    }*/
 }
 </style>

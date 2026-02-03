@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import ConfigPanel from "./components/ConfigPanel.vue";
 import PreviewPanel from "./components/PreviewPanel.vue";
 import Header from "./components/Header.vue";
@@ -30,6 +30,33 @@ onUnmounted(() => {
     window.removeEventListener("resize", checkMobile);
 });
 
+// Vigilar cambios en parsedColors para cerrar la paleta si el color activo ya no existe
+watch(
+    () => promptManager.parsedColors.value,
+    (newColors) => {
+        if (activeSlot.value) {
+            const stillExists = newColors.some(
+                (color) => color.key === activeSlot.value,
+            );
+            if (!stillExists) {
+                activeSlot.value = null;
+            }
+        }
+    },
+    { deep: true },
+);
+
+// Función para manejar el click en tabs con toggle
+const handleTabClick = (key) => {
+    if (activeSlot.value === key) {
+        // Si haces click en el tab activo, cierra la paleta
+        activeSlot.value = null;
+    } else {
+        // Si haces click en otro tab, ábrelo
+        activeSlot.value = key;
+    }
+};
+
 const showConfig = computed(
     () => !isMobile.value || activeView.value === "config",
 );
@@ -55,11 +82,14 @@ const showPreview = computed(
                 :current-task="promptManager.currentTask.value"
                 :all-tasks="promptManager.tasks.value"
                 :is-mobile="isMobile"
-                @set-active="activeSlot = $event"
+                :url-post="promptManager.urlPost.value"
+                :url-video="promptManager.urlVideo.value"
+                @set-active="handleTabClick"
                 @update-color="promptManager.updateColor"
                 @update-task-name="promptManager.updateTaskName"
                 @show-tasks="showTasks = true"
                 @export-tasks="promptManager.exportTasks"
+                @update-video-urls="promptManager.updateVideoUrls"
             />
 
             <PreviewPanel

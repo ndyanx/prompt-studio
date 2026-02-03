@@ -5,6 +5,8 @@ const tasks = ref([]);
 const currentTask = ref(null);
 const promptText = ref("");
 const colorSelections = reactive({});
+const urlPost = ref("");
+const urlVideo = ref("");
 
 let initialized = false;
 let saveTimeout = null;
@@ -17,7 +19,7 @@ export function usePromptManager() {
       await loadTasks();
 
       watch(
-        [promptText, colorSelections],
+        [promptText, colorSelections, urlPost, urlVideo],
         () => {
           if (currentTask.value) {
             // Debounce: espera 500ms sin cambios antes de guardar
@@ -112,6 +114,8 @@ export function usePromptManager() {
   const loadTask = async (task) => {
     currentTask.value = task;
     promptText.value = task.prompt;
+    urlPost.value = task.url_post || "";
+    urlVideo.value = task.url_video || "";
 
     Object.keys(colorSelections).forEach((key) => {
       delete colorSelections[key];
@@ -125,6 +129,8 @@ export function usePromptManager() {
 
     try {
       currentTask.value.prompt = promptText.value;
+      currentTask.value.url_post = urlPost.value;
+      currentTask.value.url_video = urlVideo.value;
 
       const validColors = {};
       parsedColors.value.forEach(({ key }) => {
@@ -142,6 +148,8 @@ export function usePromptManager() {
         name: currentTask.value.name,
         prompt: currentTask.value.prompt,
         colors: { ...currentTask.value.colors },
+        url_post: currentTask.value.url_post,
+        url_video: currentTask.value.url_video,
         createdAt: currentTask.value.createdAt,
         updatedAt: currentTask.value.updatedAt,
       };
@@ -172,6 +180,8 @@ export function usePromptManager() {
         name: currentTask.value.name,
         prompt: currentTask.value.prompt,
         colors: { ...currentTask.value.colors },
+        url_post: currentTask.value.url_post || "",
+        url_video: currentTask.value.url_video || "",
         createdAt: currentTask.value.createdAt,
         updatedAt: currentTask.value.updatedAt,
       };
@@ -214,6 +224,8 @@ export function usePromptManager() {
         name: `${task.name} (copia)`,
         prompt: task.prompt,
         colors: { ...task.colors },
+        url_post: task.url_post || "",
+        url_video: task.url_video || "",
       });
 
       await db.tasks.add(duplicate);
@@ -272,6 +284,8 @@ export function usePromptManager() {
               name: task.name || "Tarea importada",
               prompt: task.prompt || "",
               colors: task.colors || {},
+              url_post: task.url_post || "", // Retrocompatibilidad
+              url_video: task.url_video || "", // Retrocompatibilidad
               createdAt: task.createdAt || new Date().toISOString(),
               updatedAt: task.updatedAt || new Date().toISOString(),
             };
@@ -300,11 +314,18 @@ export function usePromptManager() {
     colorSelections[key] = color;
   };
 
+  const updateVideoUrls = ({ url_post, url_video }) => {
+    urlPost.value = url_post;
+    urlVideo.value = url_video;
+  };
+
   return {
     tasks,
     currentTask,
     promptText,
     colorSelections,
+    urlPost,
+    urlVideo,
     parsedColors,
     finalPrompt,
     createNewTask,
@@ -316,5 +337,6 @@ export function usePromptManager() {
     exportTasks,
     importTasks,
     updateColor,
+    updateVideoUrls,
   };
 }

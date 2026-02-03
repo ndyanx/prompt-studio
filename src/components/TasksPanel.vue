@@ -486,7 +486,7 @@ const isDeleteEnabled = computed(() => {
                             :disabled="!isDeleteEnabled"
                             class="confirm-delete-btn"
                         >
-                            Eliminar tarea
+                            Eliminar
                         </button>
                     </div>
                 </div>

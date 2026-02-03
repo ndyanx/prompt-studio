@@ -322,8 +322,8 @@ Gato {color:pelaje} con ojos {color:ojos}"
 
 @media (max-width: 1024px) {
     .mobile-spacer {
-        height: 140px;
-        min-height: 140px;
+        height: 100px;
+        min-height: 100px;
     }
 }
 

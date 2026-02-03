@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import ColorTabs from "./ColorTabs.vue";
 import ColorPalette from "./ColorPalette.vue";
+import VideoPreview from "./VideoPreview.vue";
 import { usePromptManager } from "../composables/usePromptManager";
 
 const props = defineProps({
@@ -11,6 +12,8 @@ const props = defineProps({
     currentTask: Object,
     isMobile: Boolean,
     allTasks: Array,
+    urlPost: String,
+    urlVideo: String,
 });
 
 const emit = defineEmits([
@@ -19,6 +22,7 @@ const emit = defineEmits([
     "update-task-name",
     "show-tasks",
     "export-tasks",
+    "update-video-urls",
 ]);
 
 const { importTasks } = usePromptManager();
@@ -186,7 +190,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
             @update-color="emit('update-color', activeSlot, $event)"
         />
 
-        <div v-else class="no-selection">
+        <div v-else-if="parsedColors.length > 0" class="no-selection">
             <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="48"
@@ -201,6 +205,15 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
             </svg>
             <p>Selecciona un color arriba</p>
         </div>
+
+        <VideoPreview
+            :url-post="urlPost"
+            :url-video="urlVideo"
+            :is-visible="true"
+            @update-urls="emit('update-video-urls', $event)"
+        />
+
+        <div class="mobile-spacer"></div>
     </main>
 </template>
 
@@ -410,6 +423,19 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 
     .duplicate-message {
         font-size: 11px;
+    }
+}
+
+/* Spacer para mobile - crea espacio extra al final */
+.mobile-spacer {
+    height: 0;
+    min-height: 0;
+}
+
+@media (max-width: 1024px) {
+    .mobile-spacer {
+        height: 100px;
+        min-height: 100px;
     }
 }
 </style>
