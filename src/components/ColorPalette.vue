@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, computed, onUnmounted } from "vue";
 import { colors } from "../data/colors";
 
 const props = defineProps({
@@ -9,17 +9,33 @@ const props = defineProps({
 
 const emit = defineEmits(["update-color"]);
 
-const searchQuery = ref("");
+const inputValue = ref("");
+const debouncedQuery = ref("");
+let searchTimeout = null;
 
 const handleColorClick = (color) => {
     emit("update-color", color);
 };
 
-const filteredColors = () => {
-    if (!searchQuery.value) return colors;
-    const query = searchQuery.value.toLowerCase();
-    return colors.filter((color) => color.toLowerCase().includes(query));
+const handleInput = (e) => {
+    // Vue actualiza inputValue automáticamente con v-model
+    // Solo debounceamos la query que filtra
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        debouncedQuery.value = inputValue.value;
+    }, 100);
 };
+
+const filteredColors = computed(() => {
+    if (!debouncedQuery.value) return colors;
+    const query = debouncedQuery.value.toLowerCase();
+    return colors.filter((color) => color.toLowerCase().includes(query));
+});
+
+// Cleanup del timeout
+onUnmounted(() => {
+    clearTimeout(searchTimeout);
+});
 </script>
 
 <template>
@@ -42,7 +58,8 @@ const filteredColors = () => {
                 <path d="m21 21-4.35-4.35" />
             </svg>
             <input
-                v-model="searchQuery"
+                v-model="inputValue"
+                @input="handleInput"
                 type="text"
                 placeholder="Buscar color..."
                 class="search-input"
@@ -52,7 +69,7 @@ const filteredColors = () => {
         <div class="scroll-container">
             <div class="color-grid">
                 <button
-                    v-for="color in filteredColors()"
+                    v-for="color in filteredColors"
                     :key="color"
                     :style="{ background: color }"
                     :title="color"
@@ -61,11 +78,9 @@ const filteredColors = () => {
                     :class="{ selected: colorSelections[activeSlot] === color }"
                 />
             </div>
-            <div v-if="filteredColors().length === 0" class="no-results">
+            <div v-if="filteredColors.length === 0" class="no-results">
                 No se encontraron colores
             </div>
-            <!-- Spacer para mobile -->
-            <!-- <div class="mobile-spacer"></div> -->
         </div>
     </div>
 </template>
@@ -140,6 +155,7 @@ const filteredColors = () => {
     grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
     gap: 8px;
     padding-bottom: 10px;
+    contain: layout;
 }
 
 .color-btn {
@@ -149,6 +165,8 @@ const filteredColors = () => {
     cursor: pointer;
     transition: all 0.2s;
     position: relative;
+    contain: layout style paint;
+    will-change: transform;
 }
 
 .color-btn:hover {
@@ -182,12 +200,6 @@ const filteredColors = () => {
     font-size: 14px;
 }
 
-/* Spacer para mobile - crea espacio extra al final */
-/*.mobile-spacer {
-    height: 0;
-    min-height: 0;
-}*/
-
 @media (max-width: 1024px) {
     .palette-section {
         overflow: visible;
@@ -198,10 +210,5 @@ const filteredColors = () => {
     .scroll-container {
         overflow-y: visible;
     }
-
-    /*.mobile-spacer {
-        height: 140px; /* Espacio para botón flotante + controles del sistema
-        min-height: 140px;
-    }*/
 }
 </style>

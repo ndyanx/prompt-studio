@@ -1,4 +1,4 @@
-import { ref, reactive, computed, watch, onMounted } from "vue";
+import { ref, reactive, computed, watch, onMounted, shallowRef } from "vue";
 import { db, Task, initDB } from "./db";
 
 const tasks = ref([]);
@@ -18,23 +18,61 @@ export function usePromptManager() {
       await initDB();
       await loadTasks();
 
+      // Watches separados en lugar de un watch deep
+      // Cada uno observa solo lo que necesita
+
+      watch(promptText, () => {
+        if (currentTask.value) {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            saveCurrentTask();
+          }, 500);
+        }
+      });
+
+      watch(urlPost, () => {
+        if (currentTask.value) {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            saveCurrentTask();
+          }, 500);
+        }
+      });
+
+      watch(urlVideo, () => {
+        if (currentTask.value) {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            saveCurrentTask();
+          }, 500);
+        }
+      });
+
+      // Para colorSelections, observar solo cuando cambian los valores
+      // Usamos JSON.stringify para detectar cambios reales
       watch(
-        [promptText, colorSelections, urlPost, urlVideo],
+        () => JSON.stringify(colorSelections),
         () => {
           if (currentTask.value) {
-            // Debounce: espera 500ms sin cambios antes de guardar
             clearTimeout(saveTimeout);
             saveTimeout = setTimeout(() => {
               saveCurrentTask();
             }, 500);
           }
         },
-        { deep: true },
       );
     }
   });
 
+  const lastPromptText = ref("");
+  const cachedParsedColors = shallowRef([]);
+
   const parsedColors = computed(() => {
+    // Si el prompt no cambió, retornar cache
+    if (promptText.value === lastPromptText.value) {
+      return cachedParsedColors.value;
+    }
+
     const regex = /\{color(?::([^}]+))?\}/g;
     const matches = [];
     let match;
@@ -63,6 +101,10 @@ export function usePromptManager() {
         delete colorSelections[key];
       }
     });
+
+    // Actualizar cache
+    lastPromptText.value = promptText.value;
+    cachedParsedColors.value = matches;
 
     return matches;
   });

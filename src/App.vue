@@ -16,18 +16,26 @@ const showTasks = ref(false);
 const isMobile = ref(false);
 const activeView = ref("config");
 
-// Detectar mobile
+// ✅ OPTIMIZACIÓN: Debounce en resize listener
+let resizeTimeout = null;
+
 const checkMobile = () => {
     isMobile.value = window.innerWidth <= 1024;
 };
 
+const debouncedCheckMobile = () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(checkMobile, 150);
+};
+
 onMounted(() => {
     checkMobile();
-    window.addEventListener("resize", checkMobile);
+    window.addEventListener("resize", debouncedCheckMobile);
 });
 
 onUnmounted(() => {
-    window.removeEventListener("resize", checkMobile);
+    window.removeEventListener("resize", debouncedCheckMobile);
+    clearTimeout(resizeTimeout);
 });
 
 // Vigilar cambios en parsedColors para cerrar la paleta si el color activo ya no existe
