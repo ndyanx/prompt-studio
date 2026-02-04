@@ -1,6 +1,8 @@
 <script setup>
 import { ref, watch, nextTick } from "vue";
 
+const API_BASE = import.meta.env.PROXY_API;
+
 const props = defineProps({
     urlPost: String,
     urlVideo: String,
@@ -57,16 +59,13 @@ const extractVideoUrl = async (postUrl) => {
             impersonate: "chrome136",
         };
 
-        const response = await fetch(
-            "https://request-wrapper.onrender.com/api/proxy",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
+        const response = await fetch(API_BASE, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
             },
-        );
+            body: JSON.stringify(payload),
+        });
 
         if (!response.ok) {
             throw new Error("Error al obtener el contenido del post");
