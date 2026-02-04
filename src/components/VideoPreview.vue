@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, nextTick } from "vue";
 
-const API_BASE = import.meta.env.VITE_PROXY_API;
+const VITE_PROXY_API = import.meta.env.VITE_PROXY_API;
 
 const props = defineProps({
     urlPost: String,
