@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, nextTick } from "vue";
 
-const API_BASE = import.meta.env.PROXY_API;
+const API_BASE = import.meta.env.VITE_PROXY_API;
 
 const props = defineProps({
     urlPost: String,
@@ -59,7 +59,7 @@ const extractVideoUrl = async (postUrl) => {
             impersonate: "chrome136",
         };
 
-        const response = await fetch(API_BASE, {
+        const response = await fetch(VITE_PROXY_API, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
