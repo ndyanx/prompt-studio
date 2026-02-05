@@ -593,7 +593,7 @@ const handleSignOut = () => {
     width: 40px;
     height: 22px;
     background: transparent;
-    border: 1px solid var(--border-color);
+    border: none;
     cursor: pointer;
     transition: border-color 0.25s;
     flex-shrink: 0;
