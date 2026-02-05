@@ -1,5 +1,13 @@
-import { ref, reactive, computed, watch, onMounted, shallowRef } from "vue";
-import { db, Task, initDB } from "./db";
+import {
+  ref,
+  reactive,
+  computed,
+  watch,
+  onMounted,
+  onUnmounted,
+  shallowRef,
+} from "vue";
+import { db, Task, initDB } from "../db/db";
 
 const tasks = ref([]);
 const currentTask = ref(null);
@@ -12,11 +20,48 @@ let initialized = false;
 let saveTimeout = null;
 
 export function usePromptManager() {
+  // Función para limpiar TODOS los datos al cerrar sesión
+  const clearLocalData = async () => {
+    try {
+      console.log("🧹 Limpiando todos los datos al cerrar sesión...");
+
+      // Limpiar IndexedDB completamente
+      await db.tasks.clear();
+      await db.settings.clear();
+
+      // Limpiar estado reactivo
+      tasks.value = [];
+      currentTask.value = null;
+      promptText.value = "";
+      Object.keys(colorSelections).forEach(
+        (key) => delete colorSelections[key],
+      );
+      urlPost.value = "";
+      urlVideo.value = "";
+
+      console.log("✅ IndexedDB y estado limpiados completamente");
+    } catch (error) {
+      console.error("❌ Error limpiando datos:", error);
+    }
+  };
+
   onMounted(async () => {
     if (!initialized) {
       initialized = true;
       await initDB();
       await loadTasks();
+
+      // Escuchar evento de cierre de sesión
+      window.addEventListener("user-signed-out", clearLocalData);
+
+      // Escuchar evento de datos restaurados para recargar tareas
+      window.addEventListener("data-restored", reloadTasks);
+
+      // Escuchar evento para crear tarea por defecto
+      window.addEventListener("create-default-task", async () => {
+        console.log("📝 Creando tarea por defecto...");
+        await createNewTask();
+      });
 
       // Watches separados en lugar de un watch deep
       // Cada uno observa solo lo que necesita
@@ -117,7 +162,7 @@ export function usePromptManager() {
     return result;
   });
 
-  const loadTasks = async () => {
+  const loadTasks = async (skipIfEmpty = false) => {
     try {
       const allTasks = await db.tasks.orderBy("updatedAt").reverse().toArray();
 
@@ -126,11 +171,16 @@ export function usePromptManager() {
       if (tasks.value.length > 0) {
         await loadTask(tasks.value[0]);
       } else {
-        await createNewTask();
+        // Si skipIfEmpty es true, no crear tarea nueva (esperamos restauración)
+        if (!skipIfEmpty) {
+          await createNewTask();
+        }
       }
     } catch (error) {
       console.error("Error loading tasks:", error);
-      await createNewTask();
+      if (!skipIfEmpty) {
+        await createNewTask();
+      }
     }
   };
 
@@ -145,6 +195,9 @@ export function usePromptManager() {
       await db.tasks.add(newTask);
       tasks.value.unshift(newTask);
       await loadTask(newTask);
+
+      // Trigger sync inmediato después de crear tarea
+      window.dispatchEvent(new CustomEvent("force-sync"));
 
       return newTask;
     } catch (error) {
@@ -255,6 +308,9 @@ export function usePromptManager() {
           await createNewTask();
         }
       }
+
+      // Trigger sync inmediato después de eliminar
+      window.dispatchEvent(new CustomEvent("force-sync"));
     } catch (error) {
       console.error("Error deleting task:", error);
     }
@@ -272,6 +328,9 @@ export function usePromptManager() {
 
       await db.tasks.add(duplicate);
       tasks.value.unshift(duplicate);
+
+      // Trigger sync inmediato después de duplicar
+      window.dispatchEvent(new CustomEvent("force-sync"));
 
       return duplicate;
     } catch (error) {
@@ -340,6 +399,10 @@ export function usePromptManager() {
           tasks.value.push(...newTasks);
 
           console.log(`✅ ${newTasks.length} tareas importadas`);
+
+          // Trigger sync inmediato después de importar
+          window.dispatchEvent(new CustomEvent("force-sync"));
+
           resolve(newTasks.length);
         } catch (error) {
           console.error("Error importing tasks:", error);
@@ -361,6 +424,18 @@ export function usePromptManager() {
     urlVideo.value = url_video;
   };
 
+  // Función para recargar tareas después de restauración
+  const reloadTasks = async () => {
+    await loadTasks();
+  };
+
+  // Cleanup del event listener
+  onUnmounted(() => {
+    window.removeEventListener("user-signed-out", clearLocalData);
+    window.removeEventListener("data-restored", reloadTasks);
+    window.removeEventListener("create-default-task", createNewTask);
+  });
+
   return {
     tasks,
     currentTask,
@@ -380,5 +455,7 @@ export function usePromptManager() {
     importTasks,
     updateColor,
     updateVideoUrls,
+    clearLocalData,
+    reloadTasks,
   };
 }

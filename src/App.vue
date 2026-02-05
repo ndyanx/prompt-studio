@@ -5,16 +5,24 @@ import PreviewPanel from "./components/PreviewPanel.vue";
 import Header from "./components/Header.vue";
 import TasksPanel from "./components/TasksPanel.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
+import AuthModal from "./components/AuthModal.vue";
+import SyncStatus from "./components/SyncStatus.vue";
 import { usePromptManager } from "./composables/usePromptManager";
 import { useTheme } from "./composables/useTheme";
+import { useAuth } from "./composables/useAuth";
+import { useSyncManager } from "./composables/useSyncManager";
 
 const { isDark, toggleTheme } = useTheme();
+const { user, isAuthenticated, signOut } = useAuth();
+const { restoreFromSupabase } = useSyncManager();
 const promptManager = usePromptManager();
 
 const activeSlot = ref(null);
 const showTasks = ref(false);
 const isMobile = ref(false);
 const activeView = ref("config");
+const showAuthModal = ref(false);
+const authModalMode = ref("login");
 
 // ✅ OPTIMIZACIÓN: Debounce en resize listener
 let resizeTimeout = null;
@@ -28,9 +36,18 @@ const debouncedCheckMobile = () => {
     resizeTimeout = setTimeout(checkMobile, 150);
 };
 
-onMounted(() => {
+onMounted(async () => {
     checkMobile();
     window.addEventListener("resize", debouncedCheckMobile);
+
+    // Restaurar desde Supabase si está autenticado
+    if (isAuthenticated.value) {
+        const result = await restoreFromSupabase();
+        if (result.success) {
+            console.log(`🔄 ${result.tasks} tareas restauradas`);
+            await promptManager.loadTasks();
+        }
+    }
 });
 
 onUnmounted(() => {
@@ -54,15 +71,41 @@ watch(
     { deep: true },
 );
 
+// Watcher para autenticación
+watch(isAuthenticated, (newVal) => {
+    if (newVal) {
+        console.log("✅ Usuario autenticado, sync activado");
+        showAuthModal.value = false;
+    }
+});
+
 // Función para manejar el click en tabs con toggle
 const handleTabClick = (key) => {
     if (activeSlot.value === key) {
-        // Si haces click en el tab activo, cierra la paleta
         activeSlot.value = null;
     } else {
-        // Si haces click en otro tab, ábrelo
         activeSlot.value = key;
     }
+};
+
+// Manejo de auth
+const handleAuthSuccess = async (user) => {
+    console.log("✅ Auth exitosa:", user.email);
+    const result = await restoreFromSupabase();
+    if (result.success) {
+        console.log(`🔄 ${result.tasks} tareas restauradas`);
+        await promptManager.loadTasks();
+    }
+};
+
+const handleOpenAuth = (mode = "login") => {
+    authModalMode.value = mode;
+    showAuthModal.value = true;
+};
+
+const handleSignOut = async () => {
+    await signOut();
+    console.log("👋 Usuario desconectado");
 };
 
 const showConfig = computed(
@@ -79,6 +122,9 @@ const showPreview = computed(
             :is-dark="isDark"
             :is-mobile="isMobile"
             @toggle-theme="toggleTheme"
+            :user="user"
+            @open-auth="handleOpenAuth"
+            @sign-out="handleSignOut"
         />
 
         <div class="app-wrapper">
@@ -98,6 +144,7 @@ const showPreview = computed(
                 @show-tasks="showTasks = true"
                 @export-tasks="promptManager.exportTasks"
                 @update-video-urls="promptManager.updateVideoUrls"
+                :is-authenticated="isAuthenticated"
             />
 
             <PreviewPanel
@@ -126,6 +173,15 @@ const showPreview = computed(
                 @delete-task="promptManager.deleteTask"
                 @duplicate-task="promptManager.duplicateTask"
             />
+
+            <!-- Auth Modal -->
+            <AuthModal
+                v-if="showAuthModal"
+                :is-open="showAuthModal"
+                :mode="authModalMode"
+                @close="showAuthModal = false"
+                @success="handleAuthSuccess"
+            />
         </div>
     </div>
 </template>
@@ -137,15 +193,24 @@ const showPreview = computed(
     height: 100vh;
     width: 100vw;
     overflow: hidden;
+    background: var(--bg-primary);
 }
 
 .app-wrapper {
     display: flex;
     flex: 1;
-    margin-top: 60px; /* Altura del header */
+    margin-top: 60px;
     height: calc(100vh - 60px);
     width: 100vw;
     position: relative;
     overflow: hidden;
+}
+
+/* Mobile adjustments */
+@media (max-width: 1024px) {
+    .app-wrapper {
+        flex-direction: column;
+        padding-bottom: 60px; /* Espacio para tab bar */
+    }
 }
 </style>

@@ -1,14 +1,27 @@
 <script setup>
 import { ref } from "vue";
+import SyncStatus from "./SyncStatus.vue"; // NUEVO
 
 const props = defineProps({
     isDark: Boolean,
     isMobile: Boolean,
+    user: Object, // NUEVO
 });
 
-const emit = defineEmits(["toggle-theme"]);
+const emit = defineEmits(["toggle-theme", "open-auth", "sign-out"]); // NUEVO
 
 const showSidebar = ref(false);
+
+// NUEVO: Manejo de usuario
+const handleUserAction = () => {
+    if (props.user) {
+        // Mostrar menú de usuario
+        emit("sign-out");
+    } else {
+        // Mostrar login
+        emit("open-auth", "login");
+    }
+};
 </script>
 
 <template>
@@ -20,95 +33,143 @@ const showSidebar = ref(false);
             </h1>
         </div>
 
-        <!-- Desktop: Mostrar switch de tema -->
-        <div class="header-right" v-if="!isMobile">
-            <button
-                class="vt-switch vt-switch-appearance"
-                type="button"
-                role="switch"
-                :aria-label="
-                    isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'
-                "
-                :aria-checked="isDark"
-                @click="emit('toggle-theme')"
-            >
-                <span class="vt-switch-check">
-                    <span class="vt-switch-icon">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            aria-hidden="true"
-                            focusable="false"
-                            viewBox="0 0 24 24"
-                            class="vt-switch-appearance-sun"
-                        >
-                            <path
-                                d="M12,18c-3.3,0-6-2.7-6-6s2.7-6,6-6s6,2.7,6,6S15.3,18,12,18zM12,8c-2.2,0-4,1.8-4,4c0,2.2,1.8,4,4,4c2.2,0,4-1.8,4-4C16,9.8,14.2,8,12,8z"
-                            ></path>
-                            <path
-                                d="M12,4c-0.6,0-1-0.4-1-1V1c0-0.6,0.4-1,1-1s1,0.4,1,1v2C13,3.6,12.6,4,12,4z"
-                            ></path>
-                            <path
-                                d="M12,24c-0.6,0-1-0.4-1-1v-2c0-0.6,0.4-1,1-1s1,0.4,1,1v2C13,23.6,12.6,24,12,24z"
-                            ></path>
-                            <path
-                                d="M5.6,6.6c-0.3,0-0.5-0.1-0.7-0.3L3.5,4.9c-0.4-0.4-0.4-1,0-1.4s1-0.4,1.4,0l1.4,1.4c0.4,0.4,0.4,1,0,1.4C6.2,6.5,5.9,6.6,5.6,6.6z"
-                            ></path>
-                            <path
-                                d="M19.8,20.8c-0.3,0-0.5-0.1-0.7-0.3l-1.4-1.4c-0.4-0.4-0.4-1,0-1.4s1-0.4,1.4,0l1.4,1.4c0.4,0.4,0.4,1,0,1.4C20.3,20.7,20,20.8,19.8,20.8z"
-                            ></path>
-                            <path
-                                d="M3,13H1c-0.6,0-1-0.4-1-1s0.4-1,1-1h2c0.6,0,1,0.4,1,1S3.6,13,3,13z"
-                            ></path>
-                            <path
-                                d="M23,13h-2c-0.6,0-1-0.4-1-1s0.4-1,1-1h2c0.6,0,1,0.4,1,1S23.6,13,23,13z"
-                            ></path>
-                            <path
-                                d="M4.2,20.8c-0.3,0-0.5-0.1-0.7-0.3c-0.4-0.4-0.4-1,0-1.4l1.4-1.4c0.4-0.4,1-0.4,1.4,0s0.4,1,0,1.4l-1.4,1.4C4.7,20.7,4.5,20.8,4.2,20.8z"
-                            ></path>
-                            <path
-                                d="M18.4,6.6c-0.3,0-0.5-0.1-0.7-0.3c-0.4-0.4-0.4-1,0-1.4l1.4-1.4c0.4-0.4,1-0.4,1.4,0s0.4,1,0,1.4l-1.4,1.4C18.9,6.5,18.6,6.6,18.4,6.6z"
-                            ></path>
-                        </svg>
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            aria-hidden="true"
-                            focusable="false"
-                            viewBox="0 0 24 24"
-                            class="vt-switch-appearance-moon"
-                        >
-                            <path
-                                d="M12.1,22c-0.3,0-0.6,0-0.9,0c-5.5-0.5-9.5-5.4-9-10.9c0.4-4.8,4.2-8.6,9-9c0.4,0,0.8,0.2,1,0.5c0.2,0.3,0.2,0.8-0.1,1.1c-2,2.7-1.4,6.4,1.3,8.4c2.1,1.6,5,1.6,7.1,0c0.3-0.2,0.7-0.3,1.1-0.1c0.3,0.2,0.5,0.6,0.5,1c-0.2,2.7-1.5,5.1-3.6,6.8C16.6,21.2,14.4,22,12.1,22zM9.3,4.4c-2.9,1-5,3.6-5.2,6.8c-0.4,4.4,2.8,8.3,7.2,8.7c2.1,0.2,4.2-0.4,5.8-1.8c1.1-0.9,1.9-2.1,2.4-3.4c-2.5,0.9-5.3,0.5-7.5-1.1C9.2,11.4,8.1,7.7,9.3,4.4z"
-                            ></path>
-                        </svg>
-                    </span>
-                </span>
-            </button>
-        </div>
+        <div class="header-right">
+            <!-- Desktop: Mostrar estado de sync y usuario -->
+            <div v-if="!isMobile" class="header-actions">
+                <!-- Sync Status Component -->
+                <SyncStatus />
 
-        <!-- Mobile: Mostrar botón hamburguesa -->
-        <div class="header-right" v-else>
-            <button
-                class="hamburger-btn"
-                @click="showSidebar = true"
-                title="Abrir menú"
-            >
-                <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
+                <!-- User Menu -->
+                <div class="user-menu-container">
+                    <button
+                        class="user-btn"
+                        @click="handleUserAction"
+                        :title="
+                            user
+                                ? `Cerrar sesión (${user.email})`
+                                : 'Iniciar sesión'
+                        "
+                    >
+                        <svg
+                            v-if="!user"
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path
+                                d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"
+                            />
+                            <circle cx="12" cy="7" r="4" />
+                        </svg>
+
+                        <div v-else class="user-avatar">
+                            {{ user.email.charAt(0).toUpperCase() }}
+                        </div>
+
+                        <span v-if="user" class="user-email">
+                            {{ user.email.split("@")[0] }}
+                        </span>
+                    </button>
+                </div>
+
+                <!-- Theme Toggle -->
+                <button
+                    class="vt-switch vt-switch-appearance"
+                    type="button"
+                    role="switch"
+                    :aria-label="
+                        isDark
+                            ? 'Cambiar a modo claro'
+                            : 'Cambiar a modo oscuro'
+                    "
+                    :aria-checked="isDark"
+                    @click="emit('toggle-theme')"
                 >
-                    <line x1="3" y1="12" x2="21" y2="12" />
-                    <line x1="3" y1="6" x2="21" y2="6" />
-                    <line x1="3" y1="18" x2="21" y2="18" />
-                </svg>
-            </button>
+                    <span class="vt-switch-check">
+                        <span class="vt-switch-icon">
+                            <svg
+                                v-if="isDark"
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+                                />
+                            </svg>
+                            <svg
+                                v-else
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <circle cx="12" cy="12" r="5" />
+                                <line x1="12" y1="1" x2="12" y2="3" />
+                                <line x1="12" y1="21" x2="12" y2="23" />
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                                <line
+                                    x1="18.36"
+                                    y1="18.36"
+                                    x2="19.78"
+                                    y2="19.78"
+                                />
+                                <line x1="1" y1="12" x2="3" y2="12" />
+                                <line x1="21" y1="12" x2="23" y2="12" />
+                                <line
+                                    x1="4.22"
+                                    y1="19.78"
+                                    x2="5.64"
+                                    y2="18.36"
+                                />
+                                <line
+                                    x1="18.36"
+                                    y1="5.64"
+                                    x2="19.78"
+                                    y2="4.22"
+                                />
+                            </svg>
+                        </span>
+                    </span>
+                </button>
+            </div>
+
+            <!-- Mobile: Mostrar botón hamburguesa -->
+            <div v-else>
+                <button
+                    class="hamburger-btn"
+                    @click="showSidebar = true"
+                    title="Abrir menú"
+                >
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                </button>
+            </div>
         </div>
 
-        <!-- Sidebar para mobile -->
+        <!-- Sidebar para mobile (actualizado con auth) -->
         <Transition name="sidebar">
             <div
                 v-if="showSidebar"
@@ -125,8 +186,8 @@ const showSidebar = ref(false);
                         >
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
-                                width="24"
-                                height="24"
+                                width="20"
+                                height="20"
                                 viewBox="0 0 24 24"
                                 fill="none"
                                 stroke="currentColor"
@@ -139,6 +200,50 @@ const showSidebar = ref(false);
                     </div>
 
                     <div class="sidebar-content">
+                        <!-- Sección Usuario -->
+                        <div class="sidebar-section">
+                            <h3>Cuenta</h3>
+                            <div v-if="user" class="user-info-mobile">
+                                <div class="user-avatar-mobile">
+                                    {{ user.email.charAt(0).toUpperCase() }}
+                                </div>
+                                <div class="user-details">
+                                    <strong>{{ user.email }}</strong>
+                                    <small>Conectado</small>
+                                </div>
+                                <button
+                                    @click="
+                                        emit('sign-out');
+                                        showSidebar = false;
+                                    "
+                                    class="sign-out-btn-mobile"
+                                >
+                                    Cerrar sesión
+                                </button>
+                            </div>
+                            <div v-else class="auth-buttons-mobile">
+                                <button
+                                    @click="
+                                        emit('open-auth', 'login');
+                                        showSidebar = false;
+                                    "
+                                    class="login-btn-mobile"
+                                >
+                                    Iniciar sesión
+                                </button>
+                                <button
+                                    @click="
+                                        emit('open-auth', 'register');
+                                        showSidebar = false;
+                                    "
+                                    class="register-btn-mobile"
+                                >
+                                    Crear cuenta
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Sección Tema -->
                         <div class="sidebar-item">
                             <span class="sidebar-label">Apariencia</span>
                             <button
@@ -151,62 +256,56 @@ const showSidebar = ref(false);
                                         : 'Cambiar a modo oscuro'
                                 "
                                 :aria-checked="isDark"
-                                @click="
-                                    emit('toggle-theme')
-                                    // showSidebar = false;
-                                "
+                                @click="emit('toggle-theme')"
                             >
                                 <span class="vt-switch-check">
                                     <span class="vt-switch-icon">
                                         <svg
+                                            v-if="isDark"
                                             xmlns="http://www.w3.org/2000/svg"
-                                            aria-hidden="true"
-                                            focusable="false"
+                                            width="14"
+                                            height="14"
                                             viewBox="0 0 24 24"
-                                            class="vt-switch-appearance-sun"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
                                         >
                                             <path
-                                                d="M12,18c-3.3,0-6-2.7-6-6s2.7-6,6-6s6,2.7,6,6S15.3,18,12,18zM12,8c-2.2,0-4,1.8-4,4c0,2.2,1.8,4,4,4c2.2,0,4-1.8,4-4C16,9.8,14.2,8,12,8z"
-                                            ></path>
-                                            <path
-                                                d="M12,4c-0.6,0-1-0.4-1-1V1c0-0.6,0.4-1,1-1s1,0.4,1,1v2C13,3.6,12.6,4,12,4z"
-                                            ></path>
-                                            <path
-                                                d="M12,24c-0.6,0-1-0.4-1-1v-2c0-0.6,0.4-1,1-1s1,0.4,1,1v2C13,23.6,12.6,24,12,24z"
-                                            ></path>
-                                            <path
-                                                d="M5.6,6.6c-0.3,0-0.5-0.1-0.7-0.3L3.5,4.9c-0.4-0.4-0.4-1,0-1.4s1-0.4,1.4,0l1.4,1.4c0.4,0.4,0.4,1,0,1.4C6.2,6.5,5.9,6.6,5.6,6.6z"
-                                            ></path>
-                                            <path
-                                                d="M19.8,20.8c-0.3,0-0.5-0.1-0.7-0.3l-1.4-1.4c-0.4-0.4-0.4-1,0-1.4s1-0.4,1.4,0l1.4,1.4c0.4,0.4,0.4,1,0,1.4C20.3,20.7,20,20.8,19.8,20.8z"
-                                            ></path>
-                                            <path
-                                                d="M3,13H1c-0.6,0-1-0.4-1-1s0.4-1,1-1h2c0.6,0,1,0.4,1,1S3.6,13,3,13z"
-                                            ></path>
-                                            <path
-                                                d="M23,13h-2c-0.6,0-1-0.4-1-1s0.4-1,1-1h2c0.6,0,1,0.4,1,1S23.6,13,23,13z"
-                                            ></path>
-                                            <path
-                                                d="M4.2,20.8c-0.3,0-0.5-0.1-0.7-0.3c-0.4-0.4-0.4-1,0-1.4l1.4-1.4c0.4-0.4,1-0.4,1.4,0s0.4,1,0,1.4l-1.4,1.4C4.7,20.7,4.5,20.8,4.2,20.8z"
-                                            ></path>
-                                            <path
-                                                d="M18.4,6.6c-0.3,0-0.5-0.1-0.7-0.3c-0.4-0.4-0.4-1,0-1.4l1.4-1.4c0.4-0.4,1-0.4,1.4,0s0.4,1,0,1.4l-1.4,1.4C18.9,6.5,18.6,6.6,18.4,6.6z"
-                                            ></path>
+                                                d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"
+                                            />
                                         </svg>
                                         <svg
+                                            v-else
                                             xmlns="http://www.w3.org/2000/svg"
-                                            aria-hidden="true"
-                                            focusable="false"
+                                            width="14"
+                                            height="14"
                                             viewBox="0 0 24 24"
-                                            class="vt-switch-appearance-moon"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
                                         >
-                                            <path
-                                                d="M12.1,22c-0.3,0-0.6,0-0.9,0c-5.5-0.5-9.5-5.4-9-10.9c0.4-4.8,4.2-8.6,9-9c0.4,0,0.8,0.2,1,0.5c0.2,0.3,0.2,0.8-0.1,1.1c-2,2.7-1.4,6.4,1.3,8.4c2.1,1.6,5,1.6,7.1,0c0.3-0.2,0.7-0.3,1.1-0.1c0.3,0.2,0.5,0.6,0.5,1c-0.2,2.7-1.5,5.1-3.6,6.8C16.6,21.2,14.4,22,12.1,22zM9.3,4.4c-2.9,1-5,3.6-5.2,6.8c-0.4,4.4,2.8,8.3,7.2,8.7c2.1,0.2,4.2-0.4,5.8-1.8c1.1-0.9,1.9-2.1,2.4-3.4c-2.5,0.9-5.3,0.5-7.5-1.1C9.2,11.4,8.1,7.7,9.3,4.4z"
-                                            ></path>
+                                            <circle cx="12" cy="12" r="5" />
                                         </svg>
                                     </span>
                                 </span>
                             </button>
+                        </div>
+
+                        <!-- Sección Sincronización -->
+                        <div v-if="user" class="sidebar-section">
+                            <h3>Sincronización</h3>
+                            <div class="sync-info-mobile">
+                                <p>
+                                    Tu data se sincroniza automáticamente cada
+                                    30 segundos
+                                </p>
+                                <button
+                                    @click="emit('manual-sync')"
+                                    class="sync-now-btn"
+                                >
+                                    Sincronizar ahora
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </aside>
@@ -216,35 +315,40 @@ const showSidebar = ref(false);
 </template>
 
 <style scoped>
+/* === HEADER BASE === */
 .app-header {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     height: 60px;
-    background: var(--card-bg);
+    background: var(--bg-primary);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 24px;
-    z-index: 900;
-    box-shadow: var(--shadow-sm);
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.9);
+}
+
+.dark-theme .app-header {
+    background: rgba(0, 0, 0, 0.9);
 }
 
 .header-left {
-    display: flex;
-    align-items: center;
+    flex: 1;
 }
 
 .app-title {
     font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-weight: 700;
+    margin: 0;
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin: 0;
+    gap: 8px;
+    color: var(--text-primary);
 }
 
 .title-icon {
@@ -257,7 +361,59 @@ const showSidebar = ref(false);
     gap: 12px;
 }
 
-/* VT Switch Styles */
+/* === HEADER ACTIONS === */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-menu-container {
+    position: relative;
+}
+
+.user-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.user-btn:hover {
+    background: var(--hover-bg);
+}
+
+.user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.user-email {
+    font-size: 13px;
+    font-weight: 500;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* === VT SWITCH (THEME TOGGLE) === */
 .vt-switch {
     position: relative;
     border-radius: 11px;
@@ -267,19 +423,11 @@ const showSidebar = ref(false);
     flex-shrink: 0;
     border: 1px solid var(--border-color);
     background-color: var(--bg-secondary);
-    transition:
-        border-color 0.25s,
-        background-color 0.25s;
-    cursor: pointer;
+    transition: background-color 0.25s;
 }
 
 .vt-switch:hover {
-    border-color: var(--accent);
-}
-
-.dark-theme .vt-switch {
-    border-color: var(--accent);
-    background-color: var(--accent);
+    background-color: var(--hover-bg);
 }
 
 .vt-switch-check {
@@ -289,14 +437,18 @@ const showSidebar = ref(false);
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    background-color: #fff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    background-color: var(--white);
+    box-shadow: var(--shadow-sm);
     transition: transform 0.25s;
 }
 
-.dark-theme .vt-switch-check {
+.vt-switch[aria-checked="true"] .vt-switch-check {
     transform: translateX(18px);
-    background-color: #000;
+}
+
+.vt-switch-appearance[aria-checked="true"] {
+    background-color: var(--accent);
+    border-color: var(--accent);
 }
 
 .vt-switch-icon {
@@ -305,101 +457,84 @@ const showSidebar = ref(false);
     width: 18px;
     height: 18px;
     border-radius: 50%;
-    overflow: hidden;
 }
 
-.vt-switch-icon > svg {
+.vt-switch-icon svg {
     position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 12px;
-    height: 12px;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
     fill: var(--text-primary);
 }
 
-.vt-switch-appearance-sun {
-    opacity: 1;
-    transition: opacity 0.25s;
-}
-
-.vt-switch-appearance-moon {
-    opacity: 0;
-    transition: opacity 0.25s;
-}
-
-.dark-theme .vt-switch-appearance-sun {
-    opacity: 0;
-}
-
-.dark-theme .vt-switch-appearance-moon {
-    opacity: 1;
-}
-
-.dark-theme .vt-switch-icon > svg {
-    fill: #fff;
-}
-
+/* === HAMBURGER BUTTON === */
 .hamburger-btn {
-    background: transparent;
+    background: none;
     border: none;
     cursor: pointer;
     padding: 8px;
+    border-radius: 8px;
     color: var(--text-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    border-radius: 8px;
 }
 
 .hamburger-btn:hover {
     background: var(--hover-bg);
 }
 
-/* Sidebar */
+/* === MOBILE SIDEBAR === */
 .sidebar-overlay {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-    z-index: 999;
+    z-index: 9999;
     display: flex;
     justify-content: flex-end;
 }
 
 .sidebar {
-    width: 100%;
-    background: var(--card-bg);
-    height: 100%;
-    display: flex;
-    flex-direction: column;
+    background: var(--bg-primary);
+    width: 320px;
+    max-width: 85vw;
+    height: 100vh;
+    padding: 24px;
+    overflow-y: auto;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.2);
 }
 
 .sidebar-header {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 20px;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
     border-bottom: 1px solid var(--border-color);
 }
 
 .sidebar-header h2 {
     font-size: 20px;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-weight: 700;
     margin: 0;
+    color: var(--text-primary);
 }
 
 .close-sidebar-btn {
-    background: transparent;
+    background: none;
     border: none;
-    cursor: pointer;
     padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 8px;
     transition: all 0.2s;
 }
 
@@ -409,36 +544,157 @@ const showSidebar = ref(false);
 }
 
 .sidebar-content {
-    flex: 1;
-    overflow-y: auto;
-    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.sidebar-section h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .sidebar-item {
     display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 16px 20px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 12px;
+    align-items: center;
+    padding: 12px 0;
 }
 
 .sidebar-label {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 500;
     color: var(--text-primary);
 }
 
-/* Transiciones */
-.sidebar-enter-active,
-.sidebar-leave-active {
-    transition: all 0.3s ease;
+/* === USER INFO MOBILE === */
+.user-info-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
 }
 
-.sidebar-enter-active .sidebar,
-.sidebar-leave-active .sidebar {
-    transition: transform 0.3s ease;
+.user-avatar-mobile {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 18px;
+    margin-bottom: 8px;
+}
+
+.user-details strong {
+    display: block;
+    font-size: 14px;
+    margin-bottom: 4px;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.user-details small {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.sign-out-btn-mobile {
+    width: 100%;
+    padding: 12px;
+    background: rgba(255, 59, 48, 0.1);
+    color: #ff3b30;
+    border: 1px solid rgba(255, 59, 48, 0.3);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sign-out-btn-mobile:hover {
+    background: rgba(255, 59, 48, 0.2);
+}
+
+.auth-buttons-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.login-btn-mobile,
+.register-btn-mobile {
+    padding: 12px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.login-btn-mobile {
+    background: var(--accent);
+    color: white;
+    border: none;
+}
+
+.login-btn-mobile:hover {
+    background: var(--accent-hover);
+}
+
+.register-btn-mobile {
+    background: transparent;
+    color: var(--accent);
+    border: 2px solid var(--accent);
+}
+
+.register-btn-mobile:hover {
+    background: rgba(0, 113, 227, 0.1);
+}
+
+.sync-info-mobile {
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.sync-info-mobile p {
+    margin-bottom: 12px;
+}
+
+.sync-now-btn {
+    width: 100%;
+    padding: 10px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sync-now-btn:hover {
+    background: var(--accent-hover);
+}
+
+/* === SIDEBAR TRANSITIONS === */
+.sidebar-enter-active,
+.sidebar-leave-active {
+    transition: opacity 0.3s ease;
 }
 
 .sidebar-enter-from,
@@ -446,14 +702,17 @@ const showSidebar = ref(false);
     opacity: 0;
 }
 
-.sidebar-enter-from .sidebar {
-    transform: translateX(100%);
+.sidebar-enter-active .sidebar,
+.sidebar-leave-active .sidebar {
+    transition: transform 0.3s ease;
 }
 
+.sidebar-enter-from .sidebar,
 .sidebar-leave-to .sidebar {
     transform: translateX(100%);
 }
 
+/* === RESPONSIVE === */
 @media (max-width: 768px) {
     .app-header {
         padding: 0 16px;
@@ -465,17 +724,6 @@ const showSidebar = ref(false);
 
     .title-icon {
         font-size: 20px;
-    }
-}
-
-@media (max-width: 480px) {
-    .app-title span:not(.title-icon) {
-        display: none;
-    }
-
-    .app-title::after {
-        content: "DPS";
-        font-size: 16px;
     }
 }
 </style>
