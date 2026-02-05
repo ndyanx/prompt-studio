@@ -274,7 +274,7 @@ const handleSubmit = () => {
 
 .password-input input {
     flex: 1;
-    padding-right: 48px;
+    /*padding-right: 48px;*/
 }
 
 .toggle-password {
