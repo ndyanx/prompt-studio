@@ -63,40 +63,9 @@ export function usePromptManager() {
         await createNewTask();
       });
 
-      // Watches separados en lugar de un watch deep
-      // Cada uno observa solo lo que necesita
-
-      watch(promptText, () => {
-        if (currentTask.value) {
-          clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => {
-            saveCurrentTask();
-          }, 500);
-        }
-      });
-
-      watch(urlPost, () => {
-        if (currentTask.value) {
-          clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => {
-            saveCurrentTask();
-          }, 500);
-        }
-      });
-
-      watch(urlVideo, () => {
-        if (currentTask.value) {
-          clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => {
-            saveCurrentTask();
-          }, 500);
-        }
-      });
-
-      // Para colorSelections, observar solo cuando cambian los valores
-      // Usamos JSON.stringify para detectar cambios reales
+      // Watch consolidado para todos los cambios que requieren guardado
       watch(
-        () => JSON.stringify(colorSelections),
+        [promptText, urlPost, urlVideo, () => JSON.stringify(colorSelections)],
         () => {
           if (currentTask.value) {
             clearTimeout(saveTimeout);
@@ -196,9 +165,6 @@ export function usePromptManager() {
       tasks.value.unshift(newTask);
       await loadTask(newTask);
 
-      // Trigger sync inmediato después de crear tarea
-      window.dispatchEvent(new CustomEvent("force-sync"));
-
       return newTask;
     } catch (error) {
       console.error("Error creating task:", error);
@@ -259,6 +225,17 @@ export function usePromptManager() {
       console.error("Error saving task:", error);
       console.error("Error name:", error.name);
       console.error("Error message:", error.message);
+
+      // Manejo específico de error de cuota excedida
+      if (error.name === "QuotaExceededError") {
+        console.error("❌ CUOTA DE ALMACENAMIENTO EXCEDIDA");
+        console.error(
+          "💡 Sugerencia: Elimina tareas antiguas o exporta y limpia datos",
+        );
+        // Podrías emitir un evento para mostrar un modal al usuario
+        window.dispatchEvent(new CustomEvent("storage-quota-exceeded"));
+      }
+
       console.error("Task data:", currentTask.value);
     }
   };
@@ -289,6 +266,11 @@ export function usePromptManager() {
       }
     } catch (error) {
       console.error("Error updating task name:", error);
+
+      if (error.name === "QuotaExceededError") {
+        console.error("❌ CUOTA DE ALMACENAMIENTO EXCEDIDA");
+        window.dispatchEvent(new CustomEvent("storage-quota-exceeded"));
+      }
     }
   };
 
@@ -308,9 +290,6 @@ export function usePromptManager() {
           await createNewTask();
         }
       }
-
-      // Trigger sync inmediato después de eliminar
-      window.dispatchEvent(new CustomEvent("force-sync"));
     } catch (error) {
       console.error("Error deleting task:", error);
     }
@@ -328,9 +307,6 @@ export function usePromptManager() {
 
       await db.tasks.add(duplicate);
       tasks.value.unshift(duplicate);
-
-      // Trigger sync inmediato después de duplicar
-      window.dispatchEvent(new CustomEvent("force-sync"));
 
       return duplicate;
     } catch (error) {
@@ -399,10 +375,6 @@ export function usePromptManager() {
           tasks.value.push(...newTasks);
 
           console.log(`✅ ${newTasks.length} tareas importadas`);
-
-          // Trigger sync inmediato después de importar
-          window.dispatchEvent(new CustomEvent("force-sync"));
-
           resolve(newTasks.length);
         } catch (error) {
           console.error("Error importing tasks:", error);
@@ -431,6 +403,12 @@ export function usePromptManager() {
 
   // Cleanup del event listener
   onUnmounted(() => {
+    // Limpiar timeout pendiente para evitar memory leak
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
+    }
+
     window.removeEventListener("user-signed-out", clearLocalData);
     window.removeEventListener("data-restored", reloadTasks);
     window.removeEventListener("create-default-task", createNewTask);

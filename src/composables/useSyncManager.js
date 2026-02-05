@@ -48,6 +48,12 @@ export function useSyncManager() {
       return;
     }
 
+    // Verificar si hay conexión a internet
+    if (!navigator.onLine) {
+      console.log("📡 Sync pausado: sin conexión a internet");
+      return;
+    }
+
     isSyncing = true;
     isSyncingNow.value = true;
     syncError.value = null;
@@ -210,6 +216,16 @@ export function useSyncManager() {
     }
   };
 
+  // Manejar reconexión a internet
+  const handleOnline = () => {
+    console.log("🌐 Conexión a internet restaurada - sincronizando...");
+    syncToSupabase();
+  };
+
+  const handleOffline = () => {
+    console.log("📡 Sin conexión a internet - sync pausado");
+  };
+
   // Restaurar automáticamente al iniciar sesión
   const handleSignIn = async () => {
     console.log("🔐 Iniciando sesión, restaurando datos desde Supabase...");
@@ -262,6 +278,8 @@ export function useSyncManager() {
     window.addEventListener("user-signed-out", handleSignOut);
     window.addEventListener("user-signed-in", handleSignIn);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
   });
 
   onUnmounted(() => {
@@ -269,6 +287,8 @@ export function useSyncManager() {
     window.removeEventListener("user-signed-out", handleSignOut);
     window.removeEventListener("user-signed-in", handleSignIn);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("online", handleOnline);
+    window.removeEventListener("offline", handleOffline);
   });
 
   return {
