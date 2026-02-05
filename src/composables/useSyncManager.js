@@ -3,17 +3,39 @@ import { supabase } from "../supabase/supabaseClient";
 import { db } from "../db/db";
 
 const SYNC_INTERVAL = 30000; // 30 segundos
+const MIN_SYNC_INTERVAL = 30000; // Mínimo 30 segundos entre syncs
 const MAX_RETRIES = 3;
 let syncInterval = null;
 let isSyncing = false;
 let retryCount = 0;
 let isTabVisible = true;
+let lastSuccessfulSync = 0; // Timestamp del último sync exitoso
 
 export function useSyncManager() {
   const lastSyncTime = ref(null);
   const isSyncingNow = ref(false);
   const syncError = ref(null);
   const syncEnabled = ref(true);
+
+  // Verificar si ha pasado suficiente tiempo desde el último sync
+  const canSyncNow = (isManual = false) => {
+    if (isManual) return true; // Sync manual siempre permitido
+
+    const now = Date.now();
+    const timeSinceLastSync = now - lastSuccessfulSync;
+
+    if (timeSinceLastSync < MIN_SYNC_INTERVAL) {
+      const remainingTime = Math.ceil(
+        (MIN_SYNC_INTERVAL - timeSinceLastSync) / 1000,
+      );
+      console.log(
+        `⏳ Throttle activo: espera ${remainingTime}s más para próximo sync`,
+      );
+      return false;
+    }
+
+    return true;
+  };
 
   const generateSnapshot = async () => {
     try {
@@ -39,11 +61,16 @@ export function useSyncManager() {
     }
   };
 
-  const syncToSupabase = async () => {
+  const syncToSupabase = async (isManual = false) => {
     if (!syncEnabled.value || isSyncing) return;
 
-    // No sincronizar si la pestaña no está visible
-    if (!isTabVisible) {
+    // Throttle: verificar tiempo mínimo entre syncs
+    if (!canSyncNow(isManual)) {
+      return;
+    }
+
+    // No sincronizar si la pestaña no está visible (excepto manual)
+    if (!isTabVisible && !isManual) {
       console.log("⏸️  Sync pausado: pestaña no visible");
       return;
     }
@@ -92,6 +119,7 @@ export function useSyncManager() {
 
       // Éxito
       lastSyncTime.value = new Date().toISOString();
+      lastSuccessfulSync = Date.now(); // Actualizar timestamp para throttling
       retryCount = 0;
 
       console.log("✅ Snapshot sincronizado:", {
@@ -152,7 +180,8 @@ export function useSyncManager() {
   };
 
   const manualSync = async () => {
-    await syncToSupabase();
+    console.log("🔄 Sincronización manual solicitada");
+    await syncToSupabase(true); // true = manual, ignora throttle
   };
 
   const restoreFromSupabase = async () => {
@@ -200,6 +229,7 @@ export function useSyncManager() {
     lastSyncTime.value = null;
     syncError.value = null;
     retryCount = 0;
+    lastSuccessfulSync = 0; // Resetear throttle
     console.log("🔒 Sync detenido por cierre de sesión");
   };
 
@@ -208,9 +238,9 @@ export function useSyncManager() {
     isTabVisible = !document.hidden;
 
     if (isTabVisible) {
-      console.log("👁️  Pestaña visible - sincronizando inmediatamente");
-      // Sincronizar inmediatamente al volver a la pestaña
-      syncToSupabase();
+      console.log("👁️  Pestaña visible");
+      // Intentar sincronizar (respetando throttle)
+      syncToSupabase(false); // false = no es manual, aplica throttle
     } else {
       console.log("🙈 Pestaña oculta - pausando sincronización automática");
     }
@@ -218,8 +248,9 @@ export function useSyncManager() {
 
   // Manejar reconexión a internet
   const handleOnline = () => {
-    console.log("🌐 Conexión a internet restaurada - sincronizando...");
-    syncToSupabase();
+    console.log("🌐 Conexión a internet restaurada");
+    // Intentar sincronizar (respetando throttle)
+    syncToSupabase(false); // false = no es manual, aplica throttle
   };
 
   const handleOffline = () => {
