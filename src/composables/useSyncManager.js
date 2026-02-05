@@ -314,7 +314,7 @@ export function useSyncManager() {
   });
 
   onUnmounted(() => {
-    stopSync();
+    // stopSync();
     window.removeEventListener("user-signed-out", handleSignOut);
     window.removeEventListener("user-signed-in", handleSignIn);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
