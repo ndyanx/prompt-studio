@@ -2,11 +2,12 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { supabase } from "../supabase/supabaseClient";
 import { db } from "../db/db";
 
-const SYNC_INTERVAL = 15000; // 15 segundos
+const SYNC_INTERVAL = 30000; // 30 segundos
 const MAX_RETRIES = 3;
 let syncInterval = null;
 let isSyncing = false;
 let retryCount = 0;
+let isTabVisible = true;
 
 export function useSyncManager() {
   const lastSyncTime = ref(null);
@@ -39,13 +40,11 @@ export function useSyncManager() {
   };
 
   const syncToSupabase = async () => {
-    if (!syncEnabled.value) {
-      console.log("⏸️  Sync deshabilitado");
-      return;
-    }
+    if (!syncEnabled.value || isSyncing) return;
 
-    if (isSyncing) {
-      console.log("⏸️  Sync ya en progreso, saltando...");
+    // No sincronizar si la pestaña no está visible
+    if (!isTabVisible) {
+      console.log("⏸️  Sync pausado: pestaña no visible");
       return;
     }
 
@@ -58,11 +57,8 @@ export function useSyncManager() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
       if (!session) {
         console.log("⏸️  Sync pausado: usuario no autenticado");
-        isSyncing = false;
-        isSyncingNow.value = false;
         return;
       }
 
@@ -130,13 +126,11 @@ export function useSyncManager() {
     }
 
     syncInterval = setInterval(() => {
-      console.log("⏰ Intervalo de sync ejecutándose (30s)...");
       syncToSupabase();
     }, SYNC_INTERVAL);
 
     // Sync inmediato al iniciar (después de 2s para dar tiempo a que cargue todo)
     setTimeout(() => {
-      console.log("🔄 Sync inicial después de login...");
       syncToSupabase();
     }, 2000);
 
@@ -203,6 +197,19 @@ export function useSyncManager() {
     console.log("🔒 Sync detenido por cierre de sesión");
   };
 
+  // Manejar cambios de visibilidad de la pestaña
+  const handleVisibilityChange = () => {
+    isTabVisible = !document.hidden;
+
+    if (isTabVisible) {
+      console.log("👁️  Pestaña visible - sincronizando inmediatamente");
+      // Sincronizar inmediatamente al volver a la pestaña
+      syncToSupabase();
+    } else {
+      console.log("🙈 Pestaña oculta - pausando sincronización automática");
+    }
+  };
+
   // Restaurar automáticamente al iniciar sesión
   const handleSignIn = async () => {
     console.log("🔐 Iniciando sesión, restaurando datos desde Supabase...");
@@ -232,15 +239,12 @@ export function useSyncManager() {
     startSync();
   };
 
-  // Forzar sincronización inmediata cuando se dispara el evento
-  const handleForceSync = async () => {
-    console.log("🔄 Sincronización forzada por cambio importante");
-    await syncToSupabase();
-  };
-
   onMounted(async () => {
     // Esperar un poco para que useAuth se inicialice primero
     await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Inicializar estado de visibilidad
+    isTabVisible = !document.hidden;
 
     // Verificar si hay sesión antes de iniciar sync
     const {
@@ -254,16 +258,17 @@ export function useSyncManager() {
       console.log("ℹ️  No hay sesión, esperando login para iniciar sync");
     }
 
+    // Agregar listeners
     window.addEventListener("user-signed-out", handleSignOut);
     window.addEventListener("user-signed-in", handleSignIn);
-    window.addEventListener("force-sync", handleForceSync);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
   });
 
   onUnmounted(() => {
     stopSync();
     window.removeEventListener("user-signed-out", handleSignOut);
     window.removeEventListener("user-signed-in", handleSignIn);
-    window.removeEventListener("force-sync", handleForceSync);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
   });
 
   return {
