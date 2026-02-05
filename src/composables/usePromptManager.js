@@ -10,11 +10,6 @@ const urlVideo = ref("");
 
 let initialized = false;
 let saveTimeout = null;
-let supabase = null;
-let currentUserId = null;
-
-// Tracking de operaciones pendientes de Supabase
-const pendingSupabaseOps = ref(0);
 
 export function usePromptManager() {
   onMounted(async () => {
@@ -23,7 +18,9 @@ export function usePromptManager() {
       await initDB();
       await loadTasks();
 
-      // Watches para auto-guardar
+      // Watches separados en lugar de un watch deep
+      // Cada uno observa solo lo que necesita
+
       watch(promptText, () => {
         if (currentTask.value) {
           clearTimeout(saveTimeout);
@@ -51,6 +48,8 @@ export function usePromptManager() {
         }
       });
 
+      // Para colorSelections, observar solo cuando cambian los valores
+      // Usamos JSON.stringify para detectar cambios reales
       watch(
         () => JSON.stringify(colorSelections),
         () => {
@@ -69,6 +68,7 @@ export function usePromptManager() {
   const cachedParsedColors = shallowRef([]);
 
   const parsedColors = computed(() => {
+    // Si el prompt no cambió, retornar cache
     if (promptText.value === lastPromptText.value) {
       return cachedParsedColors.value;
     }
@@ -102,6 +102,7 @@ export function usePromptManager() {
       }
     });
 
+    // Actualizar cache
     lastPromptText.value = promptText.value;
     cachedParsedColors.value = matches;
 
@@ -115,276 +116,6 @@ export function usePromptManager() {
     });
     return result;
   });
-
-  // ========================================
-  // CONFIGURAR SUPABASE
-  // ========================================
-  const setSupabaseClient = (client, userId) => {
-    supabase = client;
-    currentUserId = userId;
-  };
-
-  // ========================================
-  // TRACKING DE OPERACIONES PENDIENTES
-  // ========================================
-  const waitForPendingOperations = async (maxWaitMs = 10000) => {
-    if (pendingSupabaseOps.value === 0) {
-      return true;
-    }
-
-    console.log(
-      `⏳ Esperando ${pendingSupabaseOps.value} operaciones pendientes...`,
-    );
-
-    const startTime = Date.now();
-
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-
-        if (pendingSupabaseOps.value === 0) {
-          clearInterval(checkInterval);
-          console.log("✅ Todas las operaciones completadas");
-          resolve(true);
-        } else if (elapsed >= maxWaitMs) {
-          clearInterval(checkInterval);
-          console.warn(
-            `⚠️ Timeout: ${pendingSupabaseOps.value} operaciones aún pendientes`,
-          );
-          resolve(false);
-        }
-      }, 100);
-    });
-  };
-
-  // ========================================
-  // SINCRONIZACIÓN CON SUPABASE
-  // ========================================
-
-  // Sincronizar tareas locales con Supabase (al hacer login/signup)
-  const syncLocalTasksToSupabase = async () => {
-    if (!supabase || !currentUserId) {
-      console.log("⚠️ No hay conexión a Supabase");
-      return;
-    }
-
-    try {
-      pendingSupabaseOps.value++;
-
-      // 1. Obtener todas las tareas locales
-      const localTasks = await db.tasks.toArray();
-
-      if (localTasks.length === 0) {
-        console.log("ℹ️ No hay tareas locales para sincronizar");
-        return;
-      }
-
-      // 2. Preparar tareas para Supabase
-      const tasksToUpload = localTasks.map((task) => ({
-        id: task.id,
-        user_id: currentUserId,
-        name: task.name,
-        prompt: task.prompt,
-        colors: task.colors || {},
-        url_post: task.url_post || "",
-        url_video: task.url_video || "",
-        created_at: task.createdAt,
-        updated_at: task.updatedAt,
-      }));
-
-      // 3. Subir a Supabase (upsert para evitar duplicados)
-      const { error } = await supabase.from("tasks").upsert(tasksToUpload, {
-        onConflict: "id",
-      });
-
-      if (error) {
-        console.error("❌ Error al sincronizar tareas:", error);
-        throw error;
-      }
-
-      console.log(`✅ ${localTasks.length} tareas sincronizadas con Supabase`);
-    } catch (error) {
-      console.error("❌ Error en sincronización:", error);
-      throw error;
-    } finally {
-      pendingSupabaseOps.value--;
-    }
-  };
-
-  // Cargar tareas desde Supabase (al hacer login)
-  const loadTasksFromSupabase = async () => {
-    if (!supabase || !currentUserId) {
-      console.log("⚠️ No hay conexión a Supabase");
-      return;
-    }
-
-    try {
-      pendingSupabaseOps.value++;
-
-      // 1. Obtener tareas del usuario desde Supabase
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        .eq("user_id", currentUserId)
-        .order("updated_at", { ascending: false });
-
-      if (error) throw error;
-
-      if (!data || data.length === 0) {
-        console.log("ℹ️ No hay tareas en Supabase para este usuario");
-        return;
-      }
-
-      // 2. Limpiar IndexedDB
-      await db.tasks.clear();
-
-      // 3. Convertir formato Supabase a formato local
-      const localTasks = data.map((task) => ({
-        id: task.id,
-        name: task.name,
-        prompt: task.prompt,
-        colors: task.colors || {},
-        url_post: task.url_post || "",
-        url_video: task.url_video || "",
-        createdAt: task.created_at,
-        updatedAt: task.updated_at,
-      }));
-
-      // 4. Guardar en IndexedDB
-      await db.tasks.bulkAdd(localTasks);
-
-      // 5. Actualizar estado local
-      tasks.value = localTasks;
-
-      if (tasks.value.length > 0) {
-        await loadTask(tasks.value[0]);
-      }
-
-      console.log(`✅ ${localTasks.length} tareas cargadas desde Supabase`);
-    } catch (error) {
-      console.error("❌ Error al cargar tareas desde Supabase:", error);
-      throw error;
-    } finally {
-      pendingSupabaseOps.value--;
-    }
-  };
-
-  // Guardar tarea en Supabase
-  const saveTaskToSupabase = async (task) => {
-    if (!supabase || !currentUserId) {
-      return; // Solo guardar localmente si no hay conexión
-    }
-
-    try {
-      pendingSupabaseOps.value++;
-
-      const taskData = {
-        id: task.id,
-        user_id: currentUserId,
-        name: task.name,
-        prompt: task.prompt,
-        colors: task.colors || {},
-        url_post: task.url_post || "",
-        url_video: task.url_video || "",
-        created_at: task.createdAt,
-        updated_at: task.updatedAt,
-      };
-
-      const { error } = await supabase.from("tasks").upsert(taskData, {
-        onConflict: "id",
-      });
-
-      if (error) throw error;
-
-      console.log(`✅ Tarea "${task.name}" guardada en Supabase`);
-    } catch (error) {
-      console.error("❌ Error al guardar en Supabase:", error);
-      throw error;
-    } finally {
-      pendingSupabaseOps.value--;
-    }
-  };
-
-  // Eliminar tarea de Supabase
-  const deleteTaskFromSupabase = async (taskId) => {
-    if (!supabase || !currentUserId) {
-      return;
-    }
-
-    try {
-      pendingSupabaseOps.value++;
-
-      const { error } = await supabase.from("tasks").delete().eq("id", taskId);
-
-      if (error) throw error;
-
-      console.log(`✅ Tarea eliminada de Supabase`);
-    } catch (error) {
-      console.error("❌ Error al eliminar de Supabase:", error);
-      throw error;
-    } finally {
-      pendingSupabaseOps.value--;
-    }
-  };
-
-  // ========================================
-  // MANEJO DE AUTENTICACIÓN
-  // ========================================
-
-  // Llamar cuando el usuario hace SIGNUP (registrar tareas locales)
-  const handleUserSignup = async (userId, client) => {
-    setSupabaseClient(client, userId);
-    await syncLocalTasksToSupabase();
-    await loadTasksFromSupabase(); // Recargar desde Supabase
-  };
-
-  // Llamar cuando el usuario hace LOGIN (reemplazar tareas locales)
-  const handleUserLogin = async (userId, client) => {
-    setSupabaseClient(client, userId);
-    await loadTasksFromSupabase(); // Elimina locales y carga remotas
-  };
-
-  // Llamar cuando el usuario hace LOGOUT (limpiar y crear tarea por defecto)
-  const handleUserLogout = async () => {
-    console.log("🔄 Limpiando tareas al hacer logout...");
-
-    // 1. Esperar operaciones pendientes (máximo 10 segundos)
-    const completed = await waitForPendingOperations(10000);
-
-    if (!completed) {
-      console.warn("⚠️ Algunas operaciones no terminaron a tiempo");
-    }
-
-    // 2. Limpiar conexión de Supabase (ya no podemos usarlo)
-    supabase = null;
-    currentUserId = null;
-    // NO resetear el contador aquí - ya está en 0 por waitForPendingOperations
-
-    // 3. Limpiar IndexedDB
-    await db.tasks.clear();
-    console.log("✅ IndexedDB limpiado");
-
-    // 4. Limpiar estado local
-    tasks.value = [];
-
-    // 5. Crear tarea por defecto
-    const defaultTask = new Task({
-      name: "Nueva Tarea",
-      prompt:
-        "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.",
-    });
-
-    // 6. Guardar tarea por defecto localmente (NO en Supabase)
-    await db.tasks.add(defaultTask);
-    tasks.value = [defaultTask];
-    await loadTask(defaultTask);
-
-    console.log("✅ Tarea por defecto creada después del logout");
-  };
-
-  // ========================================
-  // FUNCIONES ORIGINALES (con sincronización)
-  // ========================================
 
   const loadTasks = async () => {
     try {
@@ -411,13 +142,9 @@ export function usePromptManager() {
           "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.",
       });
 
-      // Guardar localmente
       await db.tasks.add(newTask);
       tasks.value.unshift(newTask);
       await loadTask(newTask);
-
-      // Guardar en Supabase si está autenticado
-      await saveTaskToSupabase(newTask);
 
       return newTask;
     } catch (error) {
@@ -457,6 +184,7 @@ export function usePromptManager() {
       currentTask.value.colors = validColors;
       currentTask.value.updatedAt = new Date().toISOString();
 
+      // Crear un objeto plano sin reactividad de Vue
       const taskToSave = {
         id: currentTask.value.id,
         name: currentTask.value.name,
@@ -468,18 +196,17 @@ export function usePromptManager() {
         updatedAt: currentTask.value.updatedAt,
       };
 
-      // Guardar localmente
       await db.tasks.put(taskToSave);
 
       const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
       if (index !== -1) {
         tasks.value[index] = { ...currentTask.value };
       }
-
-      // Guardar en Supabase si está autenticado
-      await saveTaskToSupabase(taskToSave);
     } catch (error) {
       console.error("Error saving task:", error);
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+      console.error("Task data:", currentTask.value);
     }
   };
 
@@ -501,16 +228,12 @@ export function usePromptManager() {
         updatedAt: currentTask.value.updatedAt,
       };
 
-      // Guardar localmente
       await db.tasks.put(taskToSave);
 
       const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
       if (index !== -1) {
         tasks.value[index] = { ...currentTask.value };
       }
-
-      // Guardar en Supabase si está autenticado
-      await saveTaskToSupabase(taskToSave);
     } catch (error) {
       console.error("Error updating task name:", error);
     }
@@ -518,16 +241,12 @@ export function usePromptManager() {
 
   const deleteTask = async (taskId) => {
     try {
-      // Eliminar localmente
       await db.tasks.delete(taskId);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) {
         tasks.value.splice(index, 1);
       }
-
-      // Eliminar de Supabase si está autenticado
-      await deleteTaskFromSupabase(taskId);
 
       if (currentTask.value?.id === taskId) {
         if (tasks.value.length > 0) {
@@ -551,12 +270,8 @@ export function usePromptManager() {
         url_video: task.url_video || "",
       });
 
-      // Guardar localmente
       await db.tasks.add(duplicate);
       tasks.value.unshift(duplicate);
-
-      // Guardar en Supabase si está autenticado
-      await saveTaskToSupabase(duplicate);
 
       return duplicate;
     } catch (error) {
@@ -603,30 +318,26 @@ export function usePromptManager() {
             return;
           }
 
+          // Generar IDs únicos secuencialmente
           const baseId = Date.now();
           const newTasks = data.tasks.map((task, index) => {
             return {
-              id: baseId + index,
+              id: baseId + index, // IDs secuenciales garantizados únicos
               name: task.name || "Tarea importada",
               prompt: task.prompt || "",
               colors: task.colors || {},
-              url_post: task.url_post || "",
-              url_video: task.url_video || "",
+              url_post: task.url_post || "", // Retrocompatibilidad
+              url_video: task.url_video || "", // Retrocompatibilidad
               createdAt: task.createdAt || new Date().toISOString(),
               updatedAt: task.updatedAt || new Date().toISOString(),
             };
           });
 
-          // Guardar localmente
+          // Usar bulkAdd con nuevos IDs
           await db.tasks.bulkAdd(newTasks);
-          tasks.value.push(...newTasks);
 
-          // Guardar en Supabase si está autenticado
-          if (supabase && currentUserId) {
-            for (const task of newTasks) {
-              await saveTaskToSupabase(task);
-            }
-          }
+          // Agregar a lista local
+          tasks.value.push(...newTasks);
 
           console.log(`✅ ${newTasks.length} tareas importadas`);
           resolve(newTasks.length);
@@ -651,7 +362,6 @@ export function usePromptManager() {
   };
 
   return {
-    // Estado
     tasks,
     currentTask,
     promptText,
@@ -660,9 +370,6 @@ export function usePromptManager() {
     urlVideo,
     parsedColors,
     finalPrompt,
-    pendingSupabaseOps, // Exportar para mostrar en UI
-
-    // Funciones originales
     createNewTask,
     loadTask,
     saveCurrentTask,
@@ -673,10 +380,5 @@ export function usePromptManager() {
     importTasks,
     updateColor,
     updateVideoUrls,
-
-    // Funciones de sincronización
-    handleUserSignup,
-    handleUserLogin,
-    handleUserLogout,
   };
 }

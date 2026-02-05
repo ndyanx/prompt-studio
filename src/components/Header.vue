@@ -1,33 +1,14 @@
 <script setup>
 import { ref } from "vue";
-import UserMenu from "./auth/UserMenu.vue";
 
-defineProps({
+const props = defineProps({
     isDark: Boolean,
     isMobile: Boolean,
-    user: Object,
-    userProfile: Object,
-    isAuthenticated: Boolean,
-    isSupabaseEnabled: Boolean,
-    isSigningOut: {
-        type: Boolean,
-        default: false,
-    },
-    pendingOps: {
-        type: Number,
-        default: 0,
-    },
 });
 
-const emit = defineEmits(["toggle-theme", "open-auth", "sign-out"]);
+const emit = defineEmits(["toggle-theme"]);
 
 const showSidebar = ref(false);
-
-const handleSignOut = () => {
-    emit("sign-out");
-    // Cerrar el sidebar automáticamente
-    showSidebar.value = false;
-};
 </script>
 
 <template>
@@ -39,12 +20,17 @@ const handleSignOut = () => {
             </h1>
         </div>
 
-        <!-- Desktop: Mostrar switch de tema y autenticación -->
+        <!-- Desktop: Mostrar switch de tema -->
         <div class="header-right" v-if="!isMobile">
             <button
-                class="theme-btn"
-                @click="$emit('toggle-theme')"
-                :aria-label="isDark ? 'Modo claro' : 'Modo oscuro'"
+                class="vt-switch vt-switch-appearance"
+                type="button"
+                role="switch"
+                :aria-label="
+                    isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'
+                "
+                :aria-checked="isDark"
+                @click="emit('toggle-theme')"
             >
                 <span class="vt-switch-check">
                     <span class="vt-switch-icon">
@@ -97,33 +83,6 @@ const handleSignOut = () => {
                     </span>
                 </span>
             </button>
-
-            <!-- Autenticación en Desktop -->
-            <template v-if="isSupabaseEnabled">
-                <UserMenu
-                    v-if="isAuthenticated"
-                    :user="user"
-                    :user-profile="userProfile"
-                    :is-signing-out="isSigningOut"
-                    :pending-ops="pendingOps"
-                    @sign-out="$emit('sign-out')"
-                />
-                <button v-else class="login-btn" @click="$emit('open-auth')">
-                    <svg
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                        <polyline points="10 17 15 12 10 7" />
-                        <line x1="15" y1="12" x2="3" y2="12" />
-                    </svg>
-                    <span>Iniciar Sesión</span>
-                </button>
-            </template>
         </div>
 
         <!-- Mobile: Mostrar botón hamburguesa -->
@@ -180,7 +139,6 @@ const handleSignOut = () => {
                     </div>
 
                     <div class="sidebar-content">
-                        <!-- Tema -->
                         <div class="sidebar-item">
                             <span class="sidebar-label">Apariencia</span>
                             <button
@@ -193,7 +151,10 @@ const handleSignOut = () => {
                                         : 'Cambiar a modo oscuro'
                                 "
                                 :aria-checked="isDark"
-                                @click="emit('toggle-theme')"
+                                @click="
+                                    emit('toggle-theme')
+                                    // showSidebar = false;
+                                "
                             >
                                 <span class="vt-switch-check">
                                     <span class="vt-switch-icon">
@@ -247,94 +208,6 @@ const handleSignOut = () => {
                                 </span>
                             </button>
                         </div>
-
-                        <!-- Autenticación en Mobile Sidebar -->
-                        <template v-if="isSupabaseEnabled">
-                            <div
-                                v-if="isAuthenticated"
-                                class="sidebar-item sidebar-user"
-                            >
-                                <div class="sidebar-user-info">
-                                    <div class="sidebar-user-avatar">
-                                        <span>{{
-                                            userProfile?.username?.[0]?.toUpperCase() ||
-                                            user.email[0].toUpperCase()
-                                        }}</span>
-                                    </div>
-                                    <div class="sidebar-user-details">
-                                        <div class="sidebar-username">
-                                            @{{
-                                                userProfile?.username ||
-                                                "usuario"
-                                            }}
-                                        </div>
-                                        <div class="sidebar-email">
-                                            {{ user.email }}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div
-                                v-if="isAuthenticated"
-                                class="sidebar-item sidebar-action"
-                            >
-                                <button
-                                    class="sidebar-logout-btn"
-                                    :disabled="isSigningOut"
-                                    @click="handleSignOut"
-                                >
-                                    <svg
-                                        v-if="!isSigningOut"
-                                        width="20"
-                                        height="20"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path
-                                            d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
-                                        />
-                                        <polyline points="16 17 21 12 16 7" />
-                                        <line x1="21" y1="12" x2="9" y2="12" />
-                                    </svg>
-                                    <span v-if="!isSigningOut">
-                                        Cerrar sesión
-                                    </span>
-                                    <span v-else-if="pendingOps > 0">
-                                        Guardando ({{ pendingOps }})...
-                                    </span>
-                                    <span v-else>Cerrando...</span>
-                                </button>
-                            </div>
-
-                            <div v-else class="sidebar-item sidebar-action">
-                                <button
-                                    class="sidebar-login-btn"
-                                    @click="
-                                        emit('open-auth');
-                                        showSidebar = false;
-                                    "
-                                >
-                                    <svg
-                                        width="20"
-                                        height="20"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path
-                                            d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"
-                                        />
-                                        <polyline points="10 17 15 12 10 7" />
-                                        <line x1="15" y1="12" x2="3" y2="12" />
-                                    </svg>
-                                    <span>Iniciar Sesión</span>
-                                </button>
-                            </div>
-                        </template>
                     </div>
                 </aside>
             </div>
@@ -349,30 +222,29 @@ const handleSignOut = () => {
     left: 0;
     right: 0;
     height: 60px;
-    background: var(--bg-primary);
+    background: var(--card-bg);
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 24px;
-    z-index: 100;
+    z-index: 900;
     box-shadow: var(--shadow-sm);
 }
 
 .header-left {
     display: flex;
     align-items: center;
-    gap: 16px;
 }
 
 .app-title {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 600;
     color: var(--text-primary);
-    margin: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+    margin: 0;
 }
 
 .title-icon {
@@ -385,81 +257,77 @@ const handleSignOut = () => {
     gap: 12px;
 }
 
-/* Botón de tema */
-.theme-btn {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    padding: 8px;
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    transition: all 0.2s;
-    border-radius: 8px;
-}
-
-.theme-btn:hover {
-    background: var(--hover-bg);
-    color: var(--text-primary);
-}
-
-.vt-switch-check {
+/* VT Switch Styles */
+.vt-switch {
     position: relative;
+    border-radius: 11px;
+    display: block;
     width: 40px;
     height: 22px;
-    background: transparent;
+    flex-shrink: 0;
     border: 1px solid var(--border-color);
-    border-radius: 11px;
-    display: inline-flex;
-    align-items: center;
-    transition: border-color 0.25s;
+    background-color: var(--bg-secondary);
+    transition:
+        border-color 0.25s,
+        background-color 0.25s;
+    cursor: pointer;
 }
 
-.vt-switch-check:hover {
-    border-color: var(--text-secondary);
+.vt-switch:hover {
+    border-color: var(--accent);
 }
 
-.dark-theme .vt-switch-check {
+.dark-theme .vt-switch {
     border-color: var(--accent);
     background-color: var(--accent);
 }
 
-.vt-switch-icon {
-    position: relative;
+.vt-switch-check {
+    position: absolute;
+    top: 1px;
+    left: 1px;
     width: 18px;
     height: 18px;
-    display: block;
+    border-radius: 50%;
+    background-color: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
     transition: transform 0.25s;
-    margin-left: 2px;
 }
 
-.dark-theme .vt-switch-icon {
+.dark-theme .vt-switch-check {
     transform: translateX(18px);
+    background-color: #000;
+}
+
+.vt-switch-icon {
+    position: relative;
+    display: block;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+.vt-switch-icon > svg {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 12px;
+    height: 12px;
+    fill: var(--text-primary);
 }
 
 .vt-switch-appearance-sun {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 18px;
-    height: 18px;
-    fill: var(--text-secondary);
+    opacity: 1;
+    transition: opacity 0.25s;
 }
 
 .vt-switch-appearance-moon {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 18px;
-    height: 18px;
-    fill: #ffffff;
+    opacity: 0;
+    transition: opacity 0.25s;
 }
 
 .dark-theme .vt-switch-appearance-sun {
-    opacity: 0;
-}
-
-.vt-switch-appearance-moon {
     opacity: 0;
 }
 
@@ -467,53 +335,33 @@ const handleSignOut = () => {
     opacity: 1;
 }
 
-/* Botón de login */
-.login-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: all 0.2s ease;
+.dark-theme .vt-switch-icon > svg {
+    fill: #fff;
 }
 
-.login-btn:hover {
-    background: var(--accent-hover);
-    transform: translateY(-1px);
-}
-
-/* Hamburger button para mobile */
 .hamburger-btn {
     background: transparent;
     border: none;
     cursor: pointer;
     padding: 8px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     display: flex;
     align-items: center;
+    justify-content: center;
     transition: all 0.2s;
     border-radius: 8px;
 }
 
 .hamburger-btn:hover {
     background: var(--hover-bg);
-    color: var(--text-primary);
 }
 
 /* Sidebar */
 .sidebar-overlay {
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.4);
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
     z-index: 999;
     display: flex;
     justify-content: flex-end;
@@ -521,7 +369,6 @@ const handleSignOut = () => {
 
 .sidebar {
     width: 100%;
-    max-width: 320px;
     background: var(--card-bg);
     height: 100%;
     display: flex;
@@ -565,9 +412,6 @@ const handleSignOut = () => {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
 }
 
 .sidebar-item {
@@ -584,118 +428,6 @@ const handleSignOut = () => {
     font-size: 16px;
     font-weight: 500;
     color: var(--text-primary);
-}
-
-/* Switch en sidebar */
-.vt-switch {
-    position: relative;
-    border-radius: 11px;
-    width: 40px;
-    height: 22px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: border-color 0.25s;
-    flex-shrink: 0;
-}
-
-.vt-switch:hover {
-    border-color: var(--text-secondary);
-}
-
-.dark-theme .vt-switch {
-    border-color: var(--accent);
-    background-color: var(--accent);
-}
-
-/* Sidebar User Info */
-.sidebar-user {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
-}
-
-.sidebar-user-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-}
-
-.sidebar-user-avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 600;
-    font-size: 16px;
-    flex-shrink: 0;
-}
-
-.sidebar-user-details {
-    flex: 1;
-    min-width: 0;
-}
-
-.sidebar-username {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.sidebar-email {
-    font-size: 13px;
-    color: var(--text-secondary);
-    word-break: break-all;
-}
-
-/* Sidebar Action Buttons */
-.sidebar-action {
-    padding: 0;
-    background: transparent;
-    border: none;
-}
-
-.sidebar-login-btn,
-.sidebar-logout-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 14px 20px;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 500;
-    transition: all 0.2s ease;
-}
-
-.sidebar-login-btn:hover,
-.sidebar-logout-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
-    transform: translateY(-1px);
-}
-
-.sidebar-logout-btn {
-    background: #dc3545;
-}
-
-.sidebar-logout-btn:hover:not(:disabled) {
-    background: #c82333;
-}
-
-.sidebar-logout-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
 }
 
 /* Transiciones */
