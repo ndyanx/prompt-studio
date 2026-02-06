@@ -14,7 +14,7 @@ import { useSyncManager } from "./composables/useSyncManager";
 
 const { isDark, toggleTheme } = useTheme();
 const { user, isAuthenticated, signOut } = useAuth();
-const { restoreFromSupabase } = useSyncManager();
+const { manualSync, restoreFromSupabase } = useSyncManager();
 const promptManager = usePromptManager();
 
 const activeSlot = ref(null);
@@ -125,6 +125,7 @@ const showPreview = computed(
             :user="user"
             @open-auth="handleOpenAuth"
             @sign-out="handleSignOut"
+            @manual-sync="manualSync"
         />
 
         <div class="app-wrapper">
