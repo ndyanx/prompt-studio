@@ -21,7 +21,7 @@ const currentPage = ref(1);
 
 const searchQuery = ref("");
 const sortBy = ref("updated");
-const viewMode = ref("grid");
+const viewMode = ref("list");
 const showDeleteModal = ref(false);
 const taskToDelete = ref(null);
 const deleteConfirmText = ref("");
@@ -585,61 +585,63 @@ const pageNumbers = computed(() => {
 
             <!-- Paginación -->
             <div v-if="totalPages > 1" class="pagination">
-                <button
-                    @click="prevPage"
-                    :disabled="currentPage === 1"
-                    class="page-btn"
-                    title="Página anterior"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <polyline points="15 18 9 12 15 6" />
-                    </svg>
-                </button>
-
-                <div class="page-numbers">
+                <div class="pagination-controls">
                     <button
-                        v-for="(page, index) in pageNumbers"
-                        :key="index"
-                        @click="
-                            typeof page === 'number' ? goToPage(page) : null
-                        "
-                        :class="{
-                            'page-number': true,
-                            active: page === currentPage,
-                            ellipsis: page === '...',
-                        }"
-                        :disabled="page === '...'"
+                        @click="prevPage"
+                        :disabled="currentPage === 1"
+                        class="page-btn"
+                        title="Página anterior"
                     >
-                        {{ page }}
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <polyline points="15 18 9 12 15 6" />
+                        </svg>
+                    </button>
+
+                    <div class="page-numbers">
+                        <button
+                            v-for="(page, index) in pageNumbers"
+                            :key="index"
+                            @click="
+                                typeof page === 'number' ? goToPage(page) : null
+                            "
+                            :class="{
+                                'page-number': true,
+                                active: page === currentPage,
+                                ellipsis: page === '...',
+                            }"
+                            :disabled="page === '...'"
+                        >
+                            {{ page }}
+                        </button>
+                    </div>
+
+                    <button
+                        @click="nextPage"
+                        :disabled="currentPage === totalPages"
+                        class="page-btn"
+                        title="Página siguiente"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="16"
+                            height="16"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <polyline points="9 18 15 12 9 6" />
+                        </svg>
                     </button>
                 </div>
-
-                <button
-                    @click="nextPage"
-                    :disabled="currentPage === totalPages"
-                    class="page-btn"
-                    title="Página siguiente"
-                >
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <polyline points="9 18 15 12 9 6" />
-                    </svg>
-                </button>
 
                 <div class="page-info">
                     Página {{ currentPage }} de {{ totalPages }}
@@ -1214,12 +1216,19 @@ const pageNumbers = computed(() => {
 /* Paginación */
 .pagination {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
     gap: 12px;
     padding: 20px 32px;
     border-top: 1px solid var(--border-color);
-    flex-wrap: wrap;
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    justify-content: center;
 }
 
 .page-btn {
@@ -1234,6 +1243,7 @@ const pageNumbers = computed(() => {
     justify-content: center;
     color: var(--text-primary);
     transition: all 0.2s;
+    flex-shrink: 0;
 }
 
 .page-btn:hover:not(:disabled) {
@@ -1249,7 +1259,11 @@ const pageNumbers = computed(() => {
 
 .page-numbers {
     display: flex;
-    gap: 6px;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: center;
+    flex: 1;
+    max-width: 400px;
 }
 
 .page-number {
@@ -1267,6 +1281,7 @@ const pageNumbers = computed(() => {
     font-weight: 600;
     font-size: 14px;
     transition: all 0.2s;
+    flex-shrink: 0;
 }
 
 .page-number:hover:not(:disabled) {
@@ -1725,6 +1740,10 @@ const pageNumbers = computed(() => {
         gap: 12px;
     }
 
+    .pagination-controls {
+        gap: 6px;
+    }
+
     .page-btn {
         width: 32px;
         height: 32px;
@@ -1737,6 +1756,7 @@ const pageNumbers = computed(() => {
 
     .page-numbers {
         gap: 4px;
+        max-width: 100%;
     }
 
     .page-number {
@@ -1790,8 +1810,7 @@ const pageNumbers = computed(() => {
 @media (max-width: 360px) {
     .modal-header,
     .modal-toolbar,
-    .tasks-grid,
-    .pagination {
+    .tasks-grid {
         padding-left: 12px;
         padding-right: 12px;
     }
@@ -1840,15 +1859,37 @@ const pageNumbers = computed(() => {
         height: 30px;
     }
 
+    .pagination {
+        padding: 10px 12px;
+        gap: 8px;
+    }
+
+    .pagination-controls {
+        gap: 4px;
+        width: 100%;
+    }
+
+    .page-btn {
+        width: 30px;
+        height: 30px;
+    }
+
     .page-numbers {
-        flex-wrap: wrap;
-        justify-content: center;
+        gap: 3px;
+        flex: 1;
     }
 
     .page-number {
         min-width: 28px;
         height: 28px;
+        padding: 0 6px;
         font-size: 12px;
+    }
+
+    .page-info {
+        font-size: 11px;
+        gap: 4px;
+        text-align: center;
     }
 
     .delete-modal-actions {
