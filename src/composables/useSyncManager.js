@@ -7,16 +7,22 @@ const THROTTLE_TIME = 10000; // 10 segundos
 let isSyncing = false;
 let retryCount = 0;
 let throttleTimeout = null;
+let isRestoringData = false; // Flag para prevenir múltiples restauraciones
+
+// Estado compartido (singleton)
+const lastSyncTime = ref(null);
+const isSyncingNow = ref(false);
+const syncError = ref(null);
+const syncSuccess = ref(false);
+const isOffline = ref(!navigator.onLine);
+const isThrottled = ref(false);
+const throttleSecondsRemaining = ref(0);
+
+// Flag para controlar si ya se inicializó
+let isInitialized = false;
+let cleanupFunctions = [];
 
 export function useSyncManager() {
-  const lastSyncTime = ref(null);
-  const isSyncingNow = ref(false);
-  const syncError = ref(null);
-  const syncSuccess = ref(false);
-  const isOffline = ref(!navigator.onLine);
-  const isThrottled = ref(false); // Nuevo: indica si está en cooldown
-  const throttleSecondsRemaining = ref(0); // Nuevo: segundos restantes
-
   const generateSnapshot = async () => {
     try {
       const allTasks = await db.tasks.toArray();
@@ -275,6 +281,7 @@ export function useSyncManager() {
     retryCount = 0;
     isThrottled.value = false;
     throttleSecondsRemaining.value = 0;
+    isRestoringData = false; // Resetear flag de restauración
     if (throttleTimeout) {
       clearInterval(throttleTimeout);
       throttleTimeout = null;
@@ -296,6 +303,13 @@ export function useSyncManager() {
 
   // Restaurar automáticamente al iniciar sesión
   const handleSignIn = async () => {
+    // Prevenir múltiples ejecuciones simultáneas
+    if (isRestoringData) {
+      console.log("⏭️ Ya hay una restauración en progreso, omitiendo...");
+      return;
+    }
+
+    isRestoringData = true;
     console.log("🔑 Iniciando sesión, restaurando datos desde Supabase...");
 
     try {
@@ -310,18 +324,48 @@ export function useSyncManager() {
         // Emitir evento para que usePromptManager recargue las tareas
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else if (result.success && result.tasks === 0) {
-        console.log("ℹ️ No hay tareas en Supabase, creando tarea por defecto");
-        window.dispatchEvent(new CustomEvent("create-default-task"));
+        // No hay tareas en Supabase, verificar si hay tareas locales
+        console.log("ℹ️ No hay tareas en Supabase");
+        const localTasks = await db.tasks.count();
+        if (localTasks === 0) {
+          console.log("📝 Creando tarea por defecto");
+          window.dispatchEvent(new CustomEvent("create-default-task"));
+        } else {
+          console.log(`📋 Usando ${localTasks} tareas locales`);
+          window.dispatchEvent(new CustomEvent("data-restored"));
+        }
       } else {
-        console.log(
-          "ℹ️ No hay snapshot en Supabase, creando tarea por defecto",
-        );
-        window.dispatchEvent(new CustomEvent("create-default-task"));
+        // No hay snapshot en Supabase, verificar tareas locales
+        console.log("ℹ️ No hay snapshot en Supabase");
+        const localTasks = await db.tasks.count();
+        if (localTasks === 0) {
+          console.log("📝 Creando tarea por defecto");
+          window.dispatchEvent(new CustomEvent("create-default-task"));
+        } else {
+          console.log(`📋 Usando ${localTasks} tareas locales`);
+          window.dispatchEvent(new CustomEvent("data-restored"));
+        }
       }
     } catch (error) {
       console.error("❌ Error restaurando datos:", error);
-      // No romper la app, usar datos locales
-      window.dispatchEvent(new CustomEvent("data-restored"));
+      // No romper la app, usar datos locales si existen
+      const localTasks = await db.tasks.count();
+      if (localTasks > 0) {
+        console.log(
+          `📋 Error en restauración, usando ${localTasks} tareas locales`,
+        );
+        window.dispatchEvent(new CustomEvent("data-restored"));
+      } else {
+        console.log(
+          "📝 Error en restauración y sin tareas locales, creando tarea por defecto",
+        );
+        window.dispatchEvent(new CustomEvent("create-default-task"));
+      }
+    } finally {
+      // Resetear el flag después de un pequeño delay para evitar race conditions
+      setTimeout(() => {
+        isRestoringData = false;
+      }, 1000);
     }
   };
 
@@ -345,30 +389,44 @@ export function useSyncManager() {
   };
 
   onMounted(async () => {
-    // Inicializar estado de conexión
-    isOffline.value = !navigator.onLine;
+    // Solo inicializar una vez, sin importar cuántos componentes usen el composable
+    if (!isInitialized) {
+      isInitialized = true;
+      console.log("🚀 Inicializando useSyncManager (singleton)");
 
-    // Inicializar y restaurar si hay sesión
-    await initSync();
+      // Inicializar estado de conexión
+      isOffline.value = !navigator.onLine;
 
-    // Agregar listeners
-    window.addEventListener("user-signed-out", handleSignOut);
-    window.addEventListener("user-signed-in", handleSignIn);
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
+      // Inicializar y restaurar si hay sesión
+      await initSync();
+
+      // Agregar listeners
+      window.addEventListener("user-signed-out", handleSignOut);
+      window.addEventListener("user-signed-in", handleSignIn);
+      window.addEventListener("online", handleOnline);
+      window.addEventListener("offline", handleOffline);
+    }
   });
 
   onUnmounted(() => {
-    // Limpiar throttle timeout
-    if (throttleTimeout) {
-      clearInterval(throttleTimeout);
-      throttleTimeout = null;
-    }
+    // Registrar función de cleanup pero no ejecutarla aún
+    // Solo limpiar cuando TODOS los componentes se desmonten
+    const cleanup = () => {
+      if (throttleTimeout) {
+        clearInterval(throttleTimeout);
+        throttleTimeout = null;
+      }
 
-    window.removeEventListener("user-signed-out", handleSignOut);
-    window.removeEventListener("user-signed-in", handleSignIn);
-    window.removeEventListener("online", handleOnline);
-    window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("user-signed-out", handleSignOut);
+      window.removeEventListener("user-signed-in", handleSignIn);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+
+      isInitialized = false;
+      console.log("🧹 useSyncManager limpiado");
+    };
+
+    cleanupFunctions.push(cleanup);
   });
 
   return {

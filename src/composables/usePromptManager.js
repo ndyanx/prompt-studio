@@ -49,7 +49,9 @@ export function usePromptManager() {
     if (!initialized) {
       initialized = true;
       await initDB();
-      await loadTasks();
+
+      // NO cargar tareas aún - esperar a que useSyncManager termine de inicializar
+      await loadTasks(true); // skipIfEmpty = true para no crear tareas automáticamente
 
       // Escuchar evento de cierre de sesión
       window.addEventListener("user-signed-out", clearLocalData);
