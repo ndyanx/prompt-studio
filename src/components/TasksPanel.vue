@@ -1492,7 +1492,7 @@ const pageNumbers = computed(() => {
 
 @media (max-width: 768px) {
     .modal-container {
-        max-height: 95vh;
+        max-height: 90vh;
         border-radius: 16px;
     }
 
