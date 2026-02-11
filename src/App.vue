@@ -14,7 +14,7 @@ import { useSyncManager } from "./composables/useSyncManager";
 
 const { isDark, toggleTheme } = useTheme();
 const { user, isAuthenticated, signOut } = useAuth();
-const { manualSync, restoreFromSupabase } = useSyncManager();
+const { restoreFromSupabase } = useSyncManager();
 const promptManager = usePromptManager();
 
 const activeSlot = ref(null);
@@ -125,7 +125,7 @@ const showPreview = computed(
             :user="user"
             @open-auth="handleOpenAuth"
             @sign-out="handleSignOut"
-            @manual-sync="manualSync"
+            @show-tasks="showTasks = true"
         />
 
         <div class="app-wrapper">
@@ -172,6 +172,7 @@ const showPreview = computed(
                 @load-task="promptManager.loadTask"
                 @create-task="promptManager.createNewTask"
                 @delete-task="promptManager.deleteTask"
+                @delete-all-tasks="promptManager.deleteAllTasks"
                 @duplicate-task="promptManager.duplicateTask"
             />
 

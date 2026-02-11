@@ -49,9 +49,7 @@ export function usePromptManager() {
     if (!initialized) {
       initialized = true;
       await initDB();
-
-      // NO cargar tareas aún - esperar a que useSyncManager termine de inicializar
-      await loadTasks(true); // skipIfEmpty = true para no crear tareas automáticamente
+      await loadTasks();
 
       // Escuchar evento de cierre de sesión
       window.addEventListener("user-signed-out", clearLocalData);
@@ -65,9 +63,40 @@ export function usePromptManager() {
         await createNewTask();
       });
 
-      // Watch consolidado para todos los cambios que requieren guardado
+      // Watches separados en lugar de un watch deep
+      // Cada uno observa solo lo que necesita
+
+      watch(promptText, () => {
+        if (currentTask.value) {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            saveCurrentTask();
+          }, 500);
+        }
+      });
+
+      watch(urlPost, () => {
+        if (currentTask.value) {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            saveCurrentTask();
+          }, 500);
+        }
+      });
+
+      watch(urlVideo, () => {
+        if (currentTask.value) {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            saveCurrentTask();
+          }, 500);
+        }
+      });
+
+      // Para colorSelections, observar solo cuando cambian los valores
+      // Usamos JSON.stringify para detectar cambios reales
       watch(
-        [promptText, urlPost, urlVideo, () => JSON.stringify(colorSelections)],
+        () => JSON.stringify(colorSelections),
         () => {
           if (currentTask.value) {
             clearTimeout(saveTimeout);
@@ -227,17 +256,6 @@ export function usePromptManager() {
       console.error("Error saving task:", error);
       console.error("Error name:", error.name);
       console.error("Error message:", error.message);
-
-      // Manejo específico de error de cuota excedida
-      if (error.name === "QuotaExceededError") {
-        console.error("❌ CUOTA DE ALMACENAMIENTO EXCEDIDA");
-        console.error(
-          "💡 Sugerencia: Elimina tareas antiguas o exporta y limpia datos",
-        );
-        // Podrías emitir un evento para mostrar un modal al usuario
-        window.dispatchEvent(new CustomEvent("storage-quota-exceeded"));
-      }
-
       console.error("Task data:", currentTask.value);
     }
   };
@@ -268,11 +286,6 @@ export function usePromptManager() {
       }
     } catch (error) {
       console.error("Error updating task name:", error);
-
-      if (error.name === "QuotaExceededError") {
-        console.error("❌ CUOTA DE ALMACENAMIENTO EXCEDIDA");
-        window.dispatchEvent(new CustomEvent("storage-quota-exceeded"));
-      }
     }
   };
 
@@ -294,6 +307,18 @@ export function usePromptManager() {
       }
     } catch (error) {
       console.error("Error deleting task:", error);
+    }
+  };
+
+  const deleteAllTasks = async () => {
+    try {
+      await db.tasks.clear();
+      tasks.value = [];
+      await createNewTask();
+      console.log("✅ Todas las tareas eliminadas");
+    } catch (error) {
+      console.error("❌ Error eliminando todas las tareas:", error);
+      throw error;
     }
   };
 
@@ -405,12 +430,6 @@ export function usePromptManager() {
 
   // Cleanup del event listener
   onUnmounted(() => {
-    // Limpiar timeout pendiente para evitar memory leak
-    if (saveTimeout) {
-      clearTimeout(saveTimeout);
-      saveTimeout = null;
-    }
-
     window.removeEventListener("user-signed-out", clearLocalData);
     window.removeEventListener("data-restored", reloadTasks);
     window.removeEventListener("create-default-task", createNewTask);
@@ -430,6 +449,7 @@ export function usePromptManager() {
     saveCurrentTask,
     updateTaskName,
     deleteTask,
+    deleteAllTasks,
     duplicateTask,
     exportTasks,
     importTasks,
