@@ -42,6 +42,14 @@ watch(localUrlVideo, async (newUrl) => {
     }
 });
 
+const handleLoaded = () => {
+    if (videoRef.value) {
+        videoRef.value.play().catch(() => {
+            // Si el navegador bloquea autoplay, no rompe nada
+        });
+    }
+};
+
 const extractVideoUrl = async (postUrl) => {
     if (!postUrl.trim()) {
         localUrlVideo.value = "";
@@ -259,12 +267,13 @@ const handleVideoError = () => {
             </button>
             <video
                 ref="videoRef"
-                autoplay
                 loop
                 muted
                 playsinline
                 preload="metadata"
                 class="video-player"
+                controls
+                @loadeddata="handleLoaded"
                 @error="handleVideoError"
             >
                 <source :src="localUrlVideo" type="video/mp4" />
