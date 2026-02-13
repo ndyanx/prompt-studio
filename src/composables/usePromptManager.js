@@ -51,7 +51,21 @@ export function usePromptManager() {
     if (!initialized) {
       initialized = true;
       await initDB();
-      await loadTasks();
+
+      // 🔧 OPTIMIZACIÓN: Solo cargar tasks si NO hay sesión activa
+      // Si hay sesión, handleSignIn() se encargará de restaurar desde Supabase
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
+        // Usuario offline: cargar tasks_local inmediatamente
+        await loadTasks();
+      } else {
+        // Usuario autenticado: esperar a que handleSignIn() restaure y emita 'data-restored'
+        console.log(
+          "⏳ Sesión activa detectada, esperando restauración desde Supabase...",
+        );
+      }
 
       // Escuchar evento de cierre de sesión
       window.addEventListener("user-signed-out", clearLocalData);
