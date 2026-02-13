@@ -2,10 +2,28 @@ import Dexie from "dexie";
 
 export const db = new Dexie("PromptStudioDB");
 
+// Versión 1 (legacy - para migración)
 db.version(1).stores({
   tasks: "id, name, createdAt, updatedAt",
   settings: "key",
 });
+
+// Versión 2 (nueva arquitectura con dos tablas)
+db.version(2)
+  .stores({
+    tasks: null, // Eliminar tabla antigua
+    tasks_local: "id, name, createdAt, updatedAt", // Tareas offline (persisten siempre)
+    tasks_auth: "id, name, createdAt, updatedAt", // Tareas autenticadas (se limpian al logout)
+    settings: "key",
+  })
+  .upgrade(async (tx) => {
+    // Migrar datos de 'tasks' antigua a 'tasks_local'
+    const oldTasks = await tx.table("tasks").toArray();
+    if (oldTasks.length > 0) {
+      await tx.table("tasks_local").bulkAdd(oldTasks);
+      console.log(`✅ Migrados ${oldTasks.length} tareas de v1 → tasks_local`);
+    }
+  });
 
 export class Task {
   constructor(data = {}) {
@@ -26,9 +44,10 @@ export async function migrateFromLocalStorage() {
   const STORAGE_KEY = "prompt-studio-tasks";
 
   try {
-    const existingTasks = await db.tasks.count();
-    if (existingTasks > 0) {
-      console.log("✅ IndexedDB ya tiene datos");
+    // Verificar si ya hay datos en tasks_local (nueva arquitectura)
+    const existingLocalTasks = await db.tasks_local.count();
+    if (existingLocalTasks > 0) {
+      console.log("✅ tasks_local ya tiene datos");
       return false;
     }
 
@@ -44,8 +63,11 @@ export async function migrateFromLocalStorage() {
       return false;
     }
 
-    await db.tasks.bulkAdd(tasks);
-    console.log(`✅ Migrados ${tasks.length} tareas desde localStorage`);
+    // Migrar a tasks_local (datos offline)
+    await db.tasks_local.bulkAdd(tasks);
+    console.log(
+      `✅ Migrados ${tasks.length} tareas desde localStorage → tasks_local`,
+    );
 
     return true;
   } catch (error) {

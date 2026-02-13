@@ -25,13 +25,15 @@ let cleanupFunctions = [];
 export function useSyncManager() {
   const generateSnapshot = async () => {
     try {
-      const allTasks = await db.tasks.toArray();
+      // Solo sincronizar tasks_auth (datos autenticados)
+      // tasks_local NO se sincronizan con Supabase (son offline-only)
+      const allTasks = await db.tasks_auth.toArray();
       const settings = await db.settings.toArray();
 
       return {
         version: "2.0.0",
         timestamp: new Date().toISOString(),
-        tasks: allTasks,
+        tasks: allTasks, // Solo tasks_auth
         settings: settings,
         stats: {
           totalTasks: allTasks.length,
@@ -244,13 +246,20 @@ export function useSyncManager() {
 
       const snapshot = data.snapshot_data;
 
-      // Restaurar a IndexedDB
-      await db.tasks.clear();
+      // 🔥 IMPORTANTE: Limpiar tasks_auth ANTES de restaurar
+      // Esto previene datos duplicados o mezclados
+      await db.tasks_auth.clear();
+
+      // Restaurar a tasks_auth (NO a tasks_local)
       if (snapshot.tasks && snapshot.tasks.length > 0) {
-        await db.tasks.bulkAdd(snapshot.tasks);
+        await db.tasks_auth.bulkAdd(snapshot.tasks);
       }
 
-      console.log("✅ Snapshot restaurado:", snapshot.tasks.length, "tareas");
+      console.log(
+        "✅ Snapshot restaurado a tasks_auth:",
+        snapshot.tasks.length,
+        "tareas",
+      );
       return {
         success: true,
         tasks: snapshot.tasks.length,
@@ -287,6 +296,13 @@ export function useSyncManager() {
       throttleTimeout = null;
     }
     console.log("🔒 Sync reiniciado por cierre de sesión");
+
+    // 🔄 Emitir evento para recargar tasks_local
+    // Esto hace que usePromptManager recargue las tareas offline
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("data-restored"));
+      console.log("📱 Recargando tasks_local después de logout");
+    }, 100); // Pequeño delay para que clearLocalData() termine primero
   };
 
   // Manejar reconexión a internet
@@ -317,47 +333,49 @@ export function useSyncManager() {
 
       if (result.offline) {
         // Sin conexión, usar datos locales
-        console.log("📱 Modo offline - usando datos locales");
+        console.log("📱 Modo offline - usando datos locales (tasks_local)");
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else if (result.success && result.tasks > 0) {
-        console.log(`✅ ${result.tasks} tareas restauradas desde Supabase`);
+        console.log(
+          `✅ ${result.tasks} tareas restauradas a tasks_auth desde Supabase`,
+        );
         // Emitir evento para que usePromptManager recargue las tareas
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else if (result.success && result.tasks === 0) {
-        // No hay tareas en Supabase, verificar si hay tareas locales
+        // No hay tareas en Supabase, verificar tasks_auth local
         console.log("ℹ️ No hay tareas en Supabase");
-        const localTasks = await db.tasks.count();
-        if (localTasks === 0) {
-          console.log("📝 Creando tarea por defecto");
+        const authTasks = await db.tasks_auth.count();
+        if (authTasks === 0) {
+          console.log("📝 Creando tarea por defecto en tasks_auth");
           window.dispatchEvent(new CustomEvent("create-default-task"));
         } else {
-          console.log(`📋 Usando ${localTasks} tareas locales`);
+          console.log(`📋 Usando ${authTasks} tareas de tasks_auth local`);
           window.dispatchEvent(new CustomEvent("data-restored"));
         }
       } else {
-        // No hay snapshot en Supabase, verificar tareas locales
+        // No hay snapshot en Supabase, verificar tareas auth locales
         console.log("ℹ️ No hay snapshot en Supabase");
-        const localTasks = await db.tasks.count();
-        if (localTasks === 0) {
-          console.log("📝 Creando tarea por defecto");
+        const authTasks = await db.tasks_auth.count();
+        if (authTasks === 0) {
+          console.log("📝 Creando tarea por defecto en tasks_auth");
           window.dispatchEvent(new CustomEvent("create-default-task"));
         } else {
-          console.log(`📋 Usando ${localTasks} tareas locales`);
+          console.log(`📋 Usando ${authTasks} tareas de tasks_auth local`);
           window.dispatchEvent(new CustomEvent("data-restored"));
         }
       }
     } catch (error) {
       console.error("❌ Error restaurando datos:", error);
       // No romper la app, usar datos locales si existen
-      const localTasks = await db.tasks.count();
-      if (localTasks > 0) {
+      const authTasks = await db.tasks_auth.count();
+      if (authTasks > 0) {
         console.log(
-          `📋 Error en restauración, usando ${localTasks} tareas locales`,
+          `📋 Error en restauración, usando ${authTasks} tareas de tasks_auth`,
         );
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else {
         console.log(
-          "📝 Error en restauración y sin tareas locales, creando tarea por defecto",
+          "📝 Error en restauración y sin tareas en tasks_auth, creando tarea por defecto",
         );
         window.dispatchEvent(new CustomEvent("create-default-task"));
       }
@@ -381,6 +399,30 @@ export function useSyncManager() {
         await handleSignIn();
       } else {
         console.log("ℹ️ No hay sesión activa");
+
+        // 🐛 FIX DEL BUG: Si no hay sesión, limpiar tasks_auth
+        // Esto previene mostrar datos de un usuario anterior si borró el localStorage
+        const authTasksCount = await db.tasks_auth.count();
+        if (authTasksCount > 0) {
+          console.warn(
+            `⚠️ Datos huérfanos en tasks_auth detectados (${authTasksCount} tareas) - limpiando`,
+          );
+          await db.tasks_auth.clear();
+          console.log("✅ tasks_auth limpiada, se usarán tasks_local");
+        }
+
+        // Verificar si tasks_local tiene datos, si no crear tarea por defecto
+        const localTasksCount = await db.tasks_local.count();
+        if (localTasksCount === 0) {
+          console.log(
+            "📝 No hay tareas en tasks_local, creando tarea por defecto",
+          );
+          window.dispatchEvent(new CustomEvent("create-default-task"));
+        } else {
+          console.log(
+            `📱 Usuario offline con ${localTasksCount} tareas en tasks_local`,
+          );
+        }
       }
     } catch (error) {
       console.error("❌ Error inicializando sync:", error);

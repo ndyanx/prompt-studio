@@ -8,6 +8,7 @@ import {
   shallowRef,
 } from "vue";
 import { db, Task, initDB } from "../db/db";
+import { supabase } from "../supabase/supabaseClient";
 
 const tasks = ref([]);
 const currentTask = ref(null);
@@ -23,11 +24,12 @@ export function usePromptManager() {
   // Función para limpiar TODOS los datos al cerrar sesión
   const clearLocalData = async () => {
     try {
-      console.log("🧹 Limpiando todos los datos al cerrar sesión...");
+      console.log("🧹 Limpiando datos de sesión autenticada...");
 
-      // Limpiar IndexedDB completamente
-      await db.tasks.clear();
-      await db.settings.clear();
+      // Limpiar SOLO tasks_auth (las tareas autenticadas)
+      await db.tasks_auth.clear();
+
+      // NO tocar tasks_local (las tareas offline persisten)
 
       // Limpiar estado reactivo
       tasks.value = [];
@@ -39,7 +41,7 @@ export function usePromptManager() {
       urlPost.value = "";
       urlVideo.value = "";
 
-      console.log("✅ IndexedDB y estado limpiados completamente");
+      console.log("✅ tasks_auth limpiada, estado reiniciado");
     } catch (error) {
       console.error("❌ Error limpiando datos:", error);
     }
@@ -164,7 +166,36 @@ export function usePromptManager() {
 
   const loadTasks = async (skipIfEmpty = false) => {
     try {
-      const allTasks = await db.tasks.orderBy("updatedAt").reverse().toArray();
+      // 🔒 VERIFICACIÓN DE COHERENCIA: Determinar qué tabla usar
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      let tableName;
+      if (session) {
+        // Usuario autenticado → usar tasks_auth
+        tableName = "tasks_auth";
+        console.log("👤 Usuario autenticado, cargando tasks_auth");
+      } else {
+        // Usuario offline → usar tasks_local
+        tableName = "tasks_local";
+        console.log("📱 Usuario offline, cargando tasks_local");
+
+        // 🐛 FIX: Si no hay sesión pero tasks_auth tiene datos (bug de localStorage borrado)
+        // Limpiar tasks_auth para evitar datos huérfanos
+        const authTasksCount = await db.tasks_auth.count();
+        if (authTasksCount > 0) {
+          console.warn(
+            "⚠️ Datos huérfanos en tasks_auth detectados - limpiando",
+          );
+          await db.tasks_auth.clear();
+        }
+      }
+
+      const allTasks = await db[tableName]
+        .orderBy("updatedAt")
+        .reverse()
+        .toArray();
 
       tasks.value = allTasks;
 
@@ -186,16 +217,23 @@ export function usePromptManager() {
 
   const createNewTask = async () => {
     try {
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
       const newTask = new Task({
         name: "Nueva Tarea",
         prompt:
           "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.",
       });
 
-      await db.tasks.add(newTask);
+      await db[tableName].add(newTask);
       tasks.value.unshift(newTask);
       await loadTask(newTask);
 
+      console.log(`✅ Tarea creada en ${tableName}`);
       return newTask;
     } catch (error) {
       console.error("Error creating task:", error);
@@ -220,6 +258,12 @@ export function usePromptManager() {
     if (!currentTask.value) return;
 
     try {
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
       currentTask.value.prompt = promptText.value;
       currentTask.value.url_post = urlPost.value;
       currentTask.value.url_video = urlVideo.value;
@@ -246,7 +290,7 @@ export function usePromptManager() {
         updatedAt: currentTask.value.updatedAt,
       };
 
-      await db.tasks.put(taskToSave);
+      await db[tableName].put(taskToSave);
 
       const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
       if (index !== -1) {
@@ -264,6 +308,12 @@ export function usePromptManager() {
     if (!currentTask.value) return;
 
     try {
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
       currentTask.value.name = name;
       currentTask.value.updatedAt = new Date().toISOString();
 
@@ -278,7 +328,7 @@ export function usePromptManager() {
         updatedAt: currentTask.value.updatedAt,
       };
 
-      await db.tasks.put(taskToSave);
+      await db[tableName].put(taskToSave);
 
       const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
       if (index !== -1) {
@@ -291,7 +341,13 @@ export function usePromptManager() {
 
   const deleteTask = async (taskId) => {
     try {
-      await db.tasks.delete(taskId);
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
+      await db[tableName].delete(taskId);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) {
@@ -312,10 +368,16 @@ export function usePromptManager() {
 
   const deleteAllTasks = async () => {
     try {
-      await db.tasks.clear();
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
+      await db[tableName].clear();
       tasks.value = [];
       await createNewTask();
-      console.log("✅ Todas las tareas eliminadas");
+      console.log(`✅ Todas las tareas eliminadas de ${tableName}`);
     } catch (error) {
       console.error("❌ Error eliminando todas las tareas:", error);
       throw error;
@@ -324,6 +386,12 @@ export function usePromptManager() {
 
   const duplicateTask = async (task) => {
     try {
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
       const duplicate = new Task({
         name: `${task.name} (copia)`,
         prompt: task.prompt,
@@ -332,7 +400,7 @@ export function usePromptManager() {
         url_video: task.url_video || "",
       });
 
-      await db.tasks.add(duplicate);
+      await db[tableName].add(duplicate);
       tasks.value.unshift(duplicate);
 
       return duplicate;
@@ -344,11 +412,18 @@ export function usePromptManager() {
 
   const exportTasks = async () => {
     try {
-      const allTasks = await db.tasks.toArray();
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
+      const allTasks = await db[tableName].toArray();
 
       const data = {
         version: "2.0.0",
         exportedAt: new Date().toISOString(),
+        source: tableName, // Indicar de dónde viene (tasks_auth o tasks_local)
         tasks: allTasks,
       };
 
@@ -357,11 +432,13 @@ export function usePromptManager() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `prompt-tasks-${Date.now()}.json`;
+      link.download = `prompt-tasks-${tableName}-${Date.now()}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+
+      console.log(`✅ Exportadas ${allTasks.length} tareas desde ${tableName}`);
     } catch (error) {
       console.error("Error exporting tasks:", error);
     }
@@ -380,6 +457,12 @@ export function usePromptManager() {
             return;
           }
 
+          // Determinar tabla según sesión
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+          const tableName = session ? "tasks_auth" : "tasks_local";
+
           // Generar IDs únicos secuencialmente
           const baseId = Date.now();
           const newTasks = data.tasks.map((task, index) => {
@@ -396,12 +479,12 @@ export function usePromptManager() {
           });
 
           // Usar bulkAdd con nuevos IDs
-          await db.tasks.bulkAdd(newTasks);
+          await db[tableName].bulkAdd(newTasks);
 
           // Agregar a lista local
           tasks.value.push(...newTasks);
 
-          console.log(`✅ ${newTasks.length} tareas importadas`);
+          console.log(`✅ ${newTasks.length} tareas importadas a ${tableName}`);
           resolve(newTasks.length);
         } catch (error) {
           console.error("Error importing tasks:", error);
