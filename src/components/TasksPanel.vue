@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, shallowRef } from "vue";
 
 const props = defineProps({
     tasks: Array,
@@ -82,7 +82,28 @@ const hasUrl = (task) => {
     return !!(task.url_post || task.url_video);
 };
 
+// Cache para optimización con muchas tareas (466+)
+const lastFilterParams = ref({ query: "", sortBy: "", tasksLength: 0 });
+const cachedFilteredTasks = shallowRef([]);
+
 const filteredAndSortedTasks = computed(() => {
+    // Detectar si necesitamos recalcular
+    const currentParams = {
+        query: searchQuery.value,
+        sortBy: sortBy.value,
+        tasksLength: props.tasks.length,
+    };
+
+    const needsRecalculation =
+        currentParams.query !== lastFilterParams.value.query ||
+        currentParams.sortBy !== lastFilterParams.value.sortBy ||
+        currentParams.tasksLength !== lastFilterParams.value.tasksLength;
+
+    // Si no hay cambios, retornar cache
+    if (!needsRecalculation && cachedFilteredTasks.value.length > 0) {
+        return cachedFilteredTasks.value;
+    }
+
     let result = [...props.tasks];
 
     // Filtrar por búsqueda
@@ -110,6 +131,14 @@ const filteredAndSortedTasks = computed(() => {
                 return 0;
         }
     });
+
+    // Actualizar cache
+    cachedFilteredTasks.value = result;
+    lastFilterParams.value = currentParams;
+
+    console.log(
+        `📊 Filtradas ${result.length} de ${props.tasks.length} tareas`,
+    );
 
     return result;
 });
@@ -444,6 +473,12 @@ const pageNumbers = computed(() => {
                 <div
                     v-for="task in paginatedTasks"
                     :key="task.id"
+                    v-memo="[
+                        task.id,
+                        task.name,
+                        task.updatedAt,
+                        currentTask?.id === task.id,
+                    ]"
                     class="task-card"
                     :class="{ active: currentTask?.id === task.id }"
                 >

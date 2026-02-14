@@ -14,11 +14,34 @@ const previousIndex = ref(-1);
 const preloadedNextIndex = ref(null);
 const preloadElement = ref(null);
 
-// Filtrar solo tareas que tienen video
+// Cache para optimizar filtrado con 466 tareas
+const tasksWithVideoCache = ref([]);
+const lastTasksLength = ref(0);
+
+// Filtrar solo tareas que tienen video (optimizado con cache)
 const tasksWithVideo = computed(() => {
-    return props.tasks.filter(
+    // Si el número de tareas no cambió, retornar cache
+    if (
+        props.tasks.length === lastTasksLength.value &&
+        tasksWithVideoCache.value.length > 0
+    ) {
+        return tasksWithVideoCache.value;
+    }
+
+    // Filtrar tareas con video
+    const filtered = props.tasks.filter(
         (task) => task.url_video && task.url_video.trim() !== "",
     );
+
+    // Actualizar cache
+    tasksWithVideoCache.value = filtered;
+    lastTasksLength.value = props.tasks.length;
+
+    console.log(
+        `🎬 Filtradas ${filtered.length} tareas con video de ${props.tasks.length} totales`,
+    );
+
+    return filtered;
 });
 
 // Tarea actual mostrada
