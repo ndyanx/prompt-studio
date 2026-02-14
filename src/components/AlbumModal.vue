@@ -607,9 +607,9 @@ onUnmounted(() => {
         font-size: 16px;
     }
 
-    .album-video {
+    /*.album-video {
         max-height: 250px;
-    }
+    }*/
 
     .random-btn,
     .select-btn {

@@ -14,6 +14,7 @@ const props = defineProps({
     allTasks: Array,
     urlPost: String,
     urlVideo: String,
+    showAlbum: Boolean,
 });
 
 const emit = defineEmits([
@@ -235,6 +236,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         </div>
 
         <VideoPreview
+            v-if="!showAlbum"
             :url-post="urlPost"
             :url-video="urlVideo"
             :is-visible="true"

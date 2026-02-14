@@ -146,6 +146,7 @@ const showPreview = computed(
                 :is-mobile="isMobile"
                 :url-post="promptManager.urlPost.value"
                 :url-video="promptManager.urlVideo.value"
+                :show-album="showAlbum"
                 @set-active="handleTabClick"
                 @update-color="promptManager.updateColor"
                 @update-task-name="promptManager.updateTaskName"
