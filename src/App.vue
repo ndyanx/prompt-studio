@@ -6,6 +6,7 @@ import Header from "./components/Header.vue";
 import TasksPanel from "./components/TasksPanel.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
 import AuthModal from "./components/AuthModal.vue";
+import AlbumModal from "./components/AlbumModal.vue";
 import SyncStatus from "./components/SyncStatus.vue";
 import { usePromptManager } from "./composables/usePromptManager";
 import { useTheme } from "./composables/useTheme";
@@ -19,6 +20,7 @@ const promptManager = usePromptManager();
 
 const activeSlot = ref(null);
 const showTasks = ref(false);
+const showAlbum = ref(false);
 const isMobile = ref(false);
 const activeView = ref("config");
 const showAuthModal = ref(false);
@@ -108,6 +110,11 @@ const handleSignOut = async () => {
     console.log("👋 Usuario desconectado");
 };
 
+const handleSelectTask = (task) => {
+    promptManager.loadTask(task);
+    console.log("✅ Tarea seleccionada desde álbum:", task.name);
+};
+
 const showConfig = computed(
     () => !isMobile.value || activeView.value === "config",
 );
@@ -143,6 +150,7 @@ const showPreview = computed(
                 @update-color="promptManager.updateColor"
                 @update-task-name="promptManager.updateTaskName"
                 @show-tasks="showTasks = true"
+                @show-album="showAlbum = true"
                 @export-tasks="promptManager.exportTasks"
                 @update-video-urls="promptManager.updateVideoUrls"
                 :is-authenticated="isAuthenticated"
@@ -183,6 +191,15 @@ const showPreview = computed(
                 :mode="authModalMode"
                 @close="showAuthModal = false"
                 @success="handleAuthSuccess"
+            />
+
+            <!-- Album Modal -->
+            <AlbumModal
+                v-if="showAlbum"
+                :is-open="showAlbum"
+                :tasks="promptManager.tasks.value"
+                @close="showAlbum = false"
+                @select-task="handleSelectTask"
             />
         </div>
     </div>

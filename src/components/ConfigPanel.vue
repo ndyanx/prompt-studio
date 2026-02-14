@@ -23,6 +23,7 @@ const emit = defineEmits([
     "show-tasks",
     "export-tasks",
     "update-video-urls",
+    "show-album",
 ]);
 
 const { importTasks } = usePromptManager();
@@ -164,6 +165,33 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                             <line x1="12" y1="3" x2="12" y2="15" />
                         </svg>
                         <span v-if="!isMobile">Importar</span>
+                    </button>
+
+                    <button
+                        class="action-btn album-btn"
+                        @click="emit('show-album')"
+                        title="Ver álbum de videos"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <polygon points="23 7 16 12 23 17 23 7" />
+                            <rect
+                                x="1"
+                                y="5"
+                                width="15"
+                                height="14"
+                                rx="2"
+                                ry="2"
+                            />
+                        </svg>
+                        <span v-if="!isMobile">Álbum</span>
                     </button>
                 </div>
             </div>

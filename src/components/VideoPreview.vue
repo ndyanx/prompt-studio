@@ -273,6 +273,7 @@ const handleVideoError = () => {
                 preload="metadata"
                 class="video-player"
                 controls
+                loading="lazy"
                 @loadeddata="handleLoaded"
                 @error="handleVideoError"
             >
