@@ -21,8 +21,8 @@ const itemsPerPage = ref(10);
 const currentPage = ref(1);
 
 const searchQuery = ref("");
-const sortBy = ref("updated");
-const viewMode = ref("list");
+const sortBy = ref("created-desc");
+const viewMode = ref("grid");
 const showDeleteModal = ref(false);
 const taskToDelete = ref(null);
 const deleteConfirmText = ref("");
@@ -119,9 +119,11 @@ const filteredAndSortedTasks = computed(() => {
     // Ordenar
     result.sort((a, b) => {
         switch (sortBy.value) {
-            case "updated":
+            case "updated-desc":
                 return new Date(b.updatedAt) - new Date(a.updatedAt);
-            case "created":
+            case "created-desc":
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            case "created-asc":
                 return new Date(a.createdAt) - new Date(b.createdAt);
             case "name":
                 return a.name.localeCompare(b.name);
@@ -416,8 +418,11 @@ const pageNumbers = computed(() => {
                     </div>
 
                     <select v-model="sortBy" class="sort-select">
-                        <option value="updated">Más reciente</option>
-                        <option value="created">Más antiguo</option>
+                        <option value="updated-desc">
+                            Última modificación
+                        </option>
+                        <option value="created-desc">Creación reciente</option>
+                        <option value="created-asc">Creación antigua</option>
                         <option value="name">Nombre (A-Z)</option>
                         <option value="colors">Más colores</option>
                     </select>
