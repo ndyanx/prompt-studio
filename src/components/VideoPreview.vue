@@ -47,11 +47,13 @@ const checkAndUpgradeToHD = async (url) => {
     isUpgradingToHD.value = true;
 
     try {
+        // Usar proxy API para evitar problemas de CORS
         const payload = {
             url: hdUrl,
             method: "HEAD",
             impersonate: "chrome136",
         };
+
         const response = await fetch(VITE_PROXY_API, {
             method: "POST",
             headers: {
@@ -59,8 +61,6 @@ const checkAndUpgradeToHD = async (url) => {
             },
             body: JSON.stringify(payload),
         });
-
-        const data = await response.json();
 
         if (response.ok && data.status == 200) {
             console.log(`✨ HD version found, upgrading: ${hdUrl}`);

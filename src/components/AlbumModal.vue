@@ -1,8 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import VideoPreview from "./VideoPreview.vue";
+import { usePromptManager } from "../composables/usePromptManager";
 
 const VITE_PROXY_API = import.meta.env.VITE_PROXY_API;
+
+const { updateTaskVideoUrl } = usePromptManager();
 
 const props = defineProps({
     tasks: Array,
@@ -43,6 +46,7 @@ const checkAndUpgradeToHD = async (url, task) => {
             method: "HEAD",
             impersonate: "chrome136",
         };
+
         const response = await fetch(VITE_PROXY_API, {
             method: "POST",
             headers: {
@@ -51,16 +55,14 @@ const checkAndUpgradeToHD = async (url, task) => {
             body: JSON.stringify(payload),
         });
 
-        const data = await response.json();
-
         if (response.ok && data.status == 200) {
             console.log(`✨ HD version found in album: ${task.name}`);
 
             // Guardar en cache
             hdCheckCache.set(url, hdUrl);
 
-            // Actualizar la tarea en el array (para que se refleje en la DB)
-            task.url_video = hdUrl;
+            // Actualizar en DB usando usePromptManager
+            await updateTaskVideoUrl(task.id, hdUrl);
 
             return hdUrl;
         } else {
@@ -69,7 +71,7 @@ const checkAndUpgradeToHD = async (url, task) => {
             return url;
         }
     } catch (error) {
-        console.log(`📹 Using SD version in album`);
+        console.log(`📹 Using SD version in album:`, error.message);
         hdCheckCache.set(url, url);
         return url;
     }

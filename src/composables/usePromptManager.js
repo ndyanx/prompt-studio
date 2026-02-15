@@ -520,6 +520,52 @@ export function usePromptManager() {
     urlVideo.value = url_video;
   };
 
+  // Actualizar URL de video de cualquier tarea (usado por AlbumModal para HD upgrade)
+  const updateTaskVideoUrl = async (taskId, url_video) => {
+    try {
+      // Determinar tabla según sesión
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const tableName = session ? "tasks_auth" : "tasks_local";
+
+      // Encontrar tarea
+      const task = tasks.value.find((t) => t.id === taskId);
+      if (!task) {
+        console.warn(`⚠️ Task not found: ${taskId}`);
+        return;
+      }
+
+      // Actualizar tarea
+      task.url_video = url_video;
+      task.updatedAt = new Date().toISOString();
+
+      // Crear objeto plano para guardar
+      const taskToSave = {
+        id: task.id,
+        name: task.name,
+        prompt: task.prompt,
+        colors: { ...task.colors },
+        url_post: task.url_post,
+        url_video: url_video,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      };
+
+      // Guardar en DB
+      await db[tableName].put(taskToSave);
+
+      // Si es la tarea actual, actualizar también el estado
+      if (currentTask.value?.id === taskId) {
+        urlVideo.value = url_video;
+      }
+
+      console.log(`💾 Updated video URL for task: ${task.name}`);
+    } catch (error) {
+      console.error("❌ Error updating task video URL:", error);
+    }
+  };
+
   // Función para recargar tareas después de restauración
   const reloadTasks = async () => {
     await loadTasks();
@@ -552,6 +598,7 @@ export function usePromptManager() {
     importTasks,
     updateColor,
     updateVideoUrls,
+    updateTaskVideoUrl,
     clearLocalData,
     reloadTasks,
   };
