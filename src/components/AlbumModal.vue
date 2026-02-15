@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import VideoPreview from "./VideoPreview.vue";
 
+const VITE_PROXY_API = import.meta.env.VITE_PROXY_API;
+
 const props = defineProps({
     tasks: Array,
     isOpen: Boolean,
@@ -17,6 +19,61 @@ const preloadElement = ref(null);
 // Cache para optimizar filtrado con 466 tareas
 const tasksWithVideoCache = ref([]);
 const lastTasksLength = ref(0);
+
+// Cache para verificaciones HD
+const hdCheckCache = new Map();
+
+// Verificar y actualizar a versión HD si existe
+const checkAndUpgradeToHD = async (url, task) => {
+    // Si ya es HD, no hacer nada
+    if (!url || url.includes("_hd.mp4")) {
+        return url;
+    }
+
+    // Verificar si ya se checó esta URL
+    if (hdCheckCache.has(url)) {
+        return hdCheckCache.get(url);
+    }
+
+    const hdUrl = url.replace(".mp4", "_hd.mp4");
+
+    try {
+        const payload = {
+            url: hdUrl,
+            method: "HEAD",
+            impersonate: "chrome136",
+        };
+        const response = await fetch(VITE_PROXY_API, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.status == 200) {
+            console.log(`✨ HD version found in album: ${task.name}`);
+
+            // Guardar en cache
+            hdCheckCache.set(url, hdUrl);
+
+            // Actualizar la tarea en el array (para que se refleje en la DB)
+            task.url_video = hdUrl;
+
+            return hdUrl;
+        } else {
+            // Guardar en cache que no existe HD
+            hdCheckCache.set(url, url);
+            return url;
+        }
+    } catch (error) {
+        console.log(`📹 Using SD version in album`);
+        hdCheckCache.set(url, url);
+        return url;
+    }
+};
 
 // Filtrar solo tareas que tienen video (optimizado con cache)
 const tasksWithVideo = computed(() => {
@@ -73,6 +130,9 @@ const preloadNextVideo = async () => {
     preloadedNextIndex.value = nextIndex;
     const nextTask = tasksWithVideo.value[nextIndex];
 
+    // Verificar si hay versión HD disponible
+    const videoUrl = await checkAndUpgradeToHD(nextTask.url_video, nextTask);
+
     // Crear elemento de precarga si no existe
     if (!preloadElement.value) {
         preloadElement.value = document.createElement("video");
@@ -80,8 +140,8 @@ const preloadNextVideo = async () => {
         preloadElement.value.style.display = "none";
     }
 
-    // Cargar metadata del siguiente video
-    preloadElement.value.src = nextTask.url_video;
+    // Cargar metadata del siguiente video (HD si está disponible)
+    preloadElement.value.src = videoUrl;
 
     console.log(
         `🎬 Precargando metadata del siguiente video: ${nextTask.name}`,

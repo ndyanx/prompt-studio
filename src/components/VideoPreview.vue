@@ -17,6 +17,86 @@ const videoRef = ref(null);
 const isExpanded = ref(false);
 const isLoading = ref(false);
 const errorMessage = ref("");
+const isUpgradingToHD = ref(false);
+
+// Cache para verificaciones HD (evitar requests duplicados)
+const hdCheckCache = new Map();
+
+// Verificar y actualizar a versión HD si existe
+const checkAndUpgradeToHD = async (url) => {
+    // Si ya es HD, no hacer nada
+    if (!url || url.includes("_hd.mp4")) {
+        return;
+    }
+
+    // Verificar si ya se checó esta URL
+    if (hdCheckCache.has(url)) {
+        const hdUrl = hdCheckCache.get(url);
+        if (hdUrl && hdUrl !== url) {
+            // Ya sabemos que existe HD, actualizar
+            localUrlVideo.value = hdUrl;
+            emit("update-urls", {
+                url_post: localUrlPost.value,
+                url_video: hdUrl,
+            });
+        }
+        return;
+    }
+
+    const hdUrl = url.replace(".mp4", "_hd.mp4");
+    isUpgradingToHD.value = true;
+
+    try {
+        const payload = {
+            url: hdUrl,
+            method: "HEAD",
+            impersonate: "chrome136",
+        };
+        const response = await fetch(VITE_PROXY_API, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.status == 200) {
+            console.log(`✨ HD version found, upgrading: ${hdUrl}`);
+
+            // Guardar en cache
+            hdCheckCache.set(url, hdUrl);
+
+            // Actualizar URL local
+            localUrlVideo.value = hdUrl;
+
+            // Emitir para actualizar DB
+            emit("update-urls", {
+                url_post: localUrlPost.value,
+                url_video: hdUrl,
+            });
+
+            // Si el video está cargado, actualizarlo
+            if (videoRef.value) {
+                await nextTick();
+                videoRef.value.load();
+            }
+        } else {
+            console.log(
+                `📹 Using SD version (HD not available for this video)`,
+            );
+            // Guardar en cache que no existe HD
+            hdCheckCache.set(url, url);
+        }
+    } catch (error) {
+        console.log(`📹 Using SD version (couldn't verify HD):`, error.message);
+        // Guardar en cache que no existe HD
+        hdCheckCache.set(url, url);
+    } finally {
+        isUpgradingToHD.value = false;
+    }
+};
 
 // Sincronizar con props cuando cambian
 watch(
@@ -39,6 +119,12 @@ watch(localUrlVideo, async (newUrl) => {
         errorMessage.value = "";
         await nextTick();
         videoRef.value.load();
+
+        // Verificar versión HD en background después de 2 segundos
+        // (dar tiempo a que cargue el SD primero)
+        setTimeout(() => {
+            checkAndUpgradeToHD(newUrl);
+        }, 2000);
     }
 });
 
