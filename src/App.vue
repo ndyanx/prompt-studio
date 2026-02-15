@@ -15,7 +15,7 @@ import { useSyncManager } from "./composables/useSyncManager";
 
 const { isDark, toggleTheme } = useTheme();
 const { user, isAuthenticated, signOut } = useAuth();
-const { restoreFromSupabase } = useSyncManager();
+const { restoreFromSupabase, manualSync } = useSyncManager();
 const promptManager = usePromptManager();
 
 const activeSlot = ref(null);
@@ -110,6 +110,11 @@ const handleSignOut = async () => {
     console.log("👋 Usuario desconectado");
 };
 
+const handleSyncNow = async () => {
+    console.log("🔄 Sincronización manual desde mobile");
+    await manualSync();
+};
+
 const handleSelectTask = (task) => {
     promptManager.loadTask(task);
     console.log("✅ Tarea seleccionada desde álbum:", task.name);
@@ -133,6 +138,7 @@ const showPreview = computed(
             @open-auth="handleOpenAuth"
             @sign-out="handleSignOut"
             @show-tasks="showTasks = true"
+            @sync-now="handleSyncNow"
         />
 
         <div class="app-wrapper">

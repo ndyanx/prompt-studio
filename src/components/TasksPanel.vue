@@ -209,7 +209,7 @@ const closeDeleteAllModal = () => {
 };
 
 const confirmDeleteAll = () => {
-    if (deleteAllConfirmText.value.toLowerCase() === "borrar todo") {
+    if (deleteAllConfirmText.value.toLowerCase() === "reset") {
         emit("delete-all-tasks");
         closeDeleteAllModal();
         emit("close"); // Cerrar el panel después de eliminar
@@ -217,7 +217,7 @@ const confirmDeleteAll = () => {
 };
 
 const isDeleteAllEnabled = computed(() => {
-    return deleteAllConfirmText.value.toLowerCase() === "borrar todo";
+    return deleteAllConfirmText.value.toLowerCase() === "reset";
 });
 
 // Navegación de páginas
@@ -794,7 +794,7 @@ const pageNumbers = computed(() => {
                         :disabled="!isDeleteEnabled"
                         class="confirm-delete-btn"
                     >
-                        Eliminar tarea
+                        Eliminar
                     </button>
                 </div>
             </div>
@@ -835,13 +835,13 @@ const pageNumbers = computed(() => {
 
                 <div class="delete-modal-input-group">
                     <label class="delete-modal-label">
-                        Escribe <strong>borrar todo</strong> para confirmar
+                        Escribe <strong>reset</strong> para confirmar
                     </label>
                     <input
                         v-model="deleteAllConfirmText"
                         type="text"
                         class="delete-modal-input"
-                        placeholder="borrar todo"
+                        placeholder="reset"
                         @keyup.enter="
                             isDeleteAllEnabled ? confirmDeleteAll() : null
                         "

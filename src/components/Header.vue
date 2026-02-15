@@ -1,11 +1,12 @@
 <script setup>
-import { ref } from "vue";
-import SyncStatus from "./SyncStatus.vue"; // NUEVO
+import { ref, computed } from "vue";
+import SyncStatus from "./SyncStatus.vue";
+import { useSyncManager } from "../composables/useSyncManager";
 
 const props = defineProps({
     isDark: Boolean,
     isMobile: Boolean,
-    user: Object, // NUEVO
+    user: Object,
 });
 
 const emit = defineEmits([
@@ -13,17 +14,51 @@ const emit = defineEmits([
     "open-auth",
     "sign-out",
     "show-tasks",
-]); // NUEVO
+]);
 
 const showSidebar = ref(false);
 
-// NUEVO: Manejo de usuario
+// Obtener estado de sync
+const {
+    lastSyncTime,
+    isSyncingNow,
+    syncError,
+    syncSuccess,
+    isOffline,
+    isThrottled,
+    throttleSecondsRemaining,
+    manualSync,
+} = useSyncManager();
+
+// Función para formatear el tiempo de sync
+const formatSyncTime = computed(() => {
+    if (!lastSyncTime.value) return "Nunca";
+
+    const date = new Date(lastSyncTime.value);
+    const now = new Date();
+    const diff = now - date;
+
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+
+    if (seconds < 60) return "Hace unos segundos";
+    if (minutes < 60) return `Hace ${minutes} minuto${minutes > 1 ? "s" : ""}`;
+    if (hours < 24) return `Hace ${hours} hora${hours > 1 ? "s" : ""}`;
+
+    return date.toLocaleString("es-ES", {
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+});
+
+// Manejo de usuario
 const handleUserAction = () => {
     if (props.user) {
-        // Mostrar menú de usuario
         emit("sign-out");
     } else {
-        // Mostrar login
         emit("open-auth", "login");
     }
 };
@@ -174,7 +209,7 @@ const handleUserAction = () => {
             </div>
         </div>
 
-        <!-- Sidebar para mobile (actualizado con auth) -->
+        <!-- Sidebar para mobile -->
         <Transition name="sidebar">
             <div
                 v-if="showSidebar"
@@ -300,16 +335,170 @@ const handleUserAction = () => {
                         <div v-if="user" class="sidebar-section">
                             <h3>Sincronización</h3>
                             <div class="sync-info-mobile">
-                                <p>
-                                    Tu data se sincroniza automáticamente cada
-                                    30 segundos
+                                <p class="last-sync-text">
+                                    <strong>Última sync:</strong>
+                                    {{ formatSyncTime }}
                                 </p>
-                                <button
-                                    @click="emit('manual-sync')"
-                                    class="sync-now-btn"
+
+                                <!-- Mensaje de throttle -->
+                                <div
+                                    v-if="isThrottled && !isSyncingNow"
+                                    class="throttle-warning-mobile"
                                 >
-                                    Sincronizar ahora
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <circle cx="12" cy="12" r="10" />
+                                        <polyline points="12 6 12 12 16 14" />
+                                    </svg>
+                                    Espera
+                                    {{ throttleSecondsRemaining }} segundos para
+                                    sincronizar nuevamente
+                                </div>
+
+                                <!-- Mensaje de conexión -->
+                                <div
+                                    v-if="isOffline"
+                                    class="connection-warning-mobile"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <path
+                                            d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                                        />
+                                        <line x1="12" y1="9" x2="12" y2="13" />
+                                        <line
+                                            x1="12"
+                                            y1="17"
+                                            x2="12.01"
+                                            y2="17"
+                                        />
+                                    </svg>
+                                    Sin conexión a internet
+                                </div>
+
+                                <!-- Mensaje de error -->
+                                <div
+                                    v-if="syncError && !isOffline"
+                                    class="sync-error-message-mobile"
+                                >
+                                    {{ syncError }}
+                                </div>
+
+                                <p
+                                    v-if="
+                                        !isThrottled && !isOffline && !syncError
+                                    "
+                                >
+                                    Tu data se sincroniza manualmente cuando
+                                    presionas el botón
+                                </p>
+
+                                <!-- Botón de sincronizar con estados -->
+                                <button
+                                    v-if="!isSyncingNow"
+                                    @click="
+                                        manualSync();
+                                        showSidebar = false;
+                                    "
+                                    class="sync-now-btn"
+                                    :class="{
+                                        success: syncSuccess,
+                                        disabled: isOffline || isThrottled,
+                                    }"
+                                    :disabled="isOffline || isThrottled"
+                                >
+                                    <svg
+                                        v-if="
+                                            !syncSuccess &&
+                                            !isOffline &&
+                                            !isThrottled
+                                        "
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <path d="M23 4v6h-6" />
+                                        <path
+                                            d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"
+                                        />
+                                    </svg>
+                                    <svg
+                                        v-else-if="!isOffline && !isThrottled"
+                                        class="checkmark-btn"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <path d="M20 6L9 17l-5-5" />
+                                    </svg>
+                                    <svg
+                                        v-else-if="isThrottled"
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <circle cx="12" cy="12" r="10" />
+                                        <polyline points="12 6 12 12 16 14" />
+                                    </svg>
+                                    <svg
+                                        v-else
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        width="16"
+                                        height="16"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                    >
+                                        <line x1="1" y1="1" x2="23" y2="23" />
+                                        <path
+                                            d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39"
+                                        />
+                                    </svg>
+                                    {{
+                                        syncSuccess
+                                            ? "¡Sincronizado!"
+                                            : isOffline
+                                              ? "Sin conexión"
+                                              : isThrottled
+                                                ? `Espera ${throttleSecondsRemaining}s`
+                                                : "Sincronizar ahora"
+                                    }}
                                 </button>
+
+                                <!-- Mensaje de sincronizando -->
+                                <div
+                                    v-if="isSyncingNow"
+                                    class="syncing-message-mobile"
+                                >
+                                    Sincronizando tus datos...
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -666,6 +855,7 @@ const handleUserAction = () => {
     background: rgba(0, 113, 227, 0.1);
 }
 
+/* === SYNC INFO MOBILE === */
 .sync-info-mobile {
     padding: 12px;
     background: var(--bg-secondary);
@@ -675,8 +865,79 @@ const handleUserAction = () => {
     line-height: 1.5;
 }
 
+.last-sync-text {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+.last-sync-text strong {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
 .sync-info-mobile p {
     margin-bottom: 12px;
+}
+
+.throttle-warning-mobile {
+    font-size: 12px;
+    color: #ff9500;
+    padding: 10px;
+    background: rgba(255, 149, 0, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 149, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.4;
+    margin-bottom: 12px;
+}
+
+.connection-warning-mobile {
+    font-size: 12px;
+    color: #ff9500;
+    padding: 10px;
+    background: rgba(255, 149, 0, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 149, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.4;
+    margin-bottom: 12px;
+}
+
+.sync-error-message-mobile {
+    font-size: 12px;
+    color: #ff3b30;
+    padding: 10px;
+    background: rgba(255, 59, 48, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 59, 48, 0.3);
+    margin-bottom: 12px;
+}
+
+.syncing-message-mobile {
+    font-size: 12px;
+    color: var(--accent);
+    padding: 10px;
+    background: rgba(10, 132, 255, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(10, 132, 255, 0.3);
+    text-align: center;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
 }
 
 .sync-now-btn {
@@ -689,11 +950,67 @@ const handleUserAction = () => {
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
 }
 
-.sync-now-btn:hover {
+.sync-now-btn:hover:not(.disabled) {
     background: var(--accent-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.3);
+}
+
+.sync-now-btn:active:not(.disabled) {
+    transform: translateY(0);
+}
+
+/* Botón deshabilitado (offline o throttled) */
+.sync-now-btn.disabled {
+    background: rgba(142, 142, 147, 0.3);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Botón en estado de éxito */
+.sync-now-btn.success {
+    background: #30d158;
+    animation: successBtnPulse 0.6s ease;
+}
+
+.sync-now-btn.success:hover {
+    background: #28a745;
+    box-shadow: 0 4px 12px rgba(48, 209, 88, 0.4);
+}
+
+@keyframes successBtnPulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+.checkmark-btn {
+    animation: checkmarkDraw 0.5s ease;
+}
+
+@keyframes checkmarkDraw {
+    0% {
+        stroke-dasharray: 0, 100;
+        stroke-dashoffset: 0;
+    }
+    100% {
+        stroke-dasharray: 100, 100;
+        stroke-dashoffset: 0;
+    }
 }
 
 .delete-all-mobile-btn {
