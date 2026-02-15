@@ -358,7 +358,7 @@ const handleVideoError = () => {
                 loop
                 muted
                 playsinline
-                preload="metadata"
+                preload="auto"
                 class="video-player"
                 controls
                 loading="lazy"

@@ -19,6 +19,11 @@ const previousIndex = ref(-1);
 const preloadedNextIndex = ref(null);
 const preloadElement = ref(null);
 
+// Cooldown para botón "Otro video" (evitar spam)
+const isRandomizing = ref(false);
+const cooldownSeconds = ref(0);
+let cooldownInterval = null;
+
 // Cache para optimizar filtrado con 466 tareas
 const tasksWithVideoCache = ref([]);
 const lastTasksLength = ref(0);
@@ -154,12 +159,22 @@ const preloadNextVideo = async () => {
 
 // Seleccionar tarea aleatoria evitando repetir la anterior
 const randomizeTask = () => {
+    // Si está en cooldown, no hacer nada
+    if (isRandomizing.value) {
+        console.log(`⏳ Cooldown activo: ${cooldownSeconds.value}s restantes`);
+        return;
+    }
+
     if (tasksWithVideo.value.length === 0) return;
 
     if (tasksWithVideo.value.length === 1) {
         currentTaskIndex.value = 0;
         return;
     }
+
+    // Activar cooldown
+    isRandomizing.value = true;
+    cooldownSeconds.value = 6;
 
     // Si hay un video precargado, usarlo
     if (preloadedNextIndex.value !== null) {
@@ -177,6 +192,18 @@ const randomizeTask = () => {
         previousIndex.value = currentTaskIndex.value;
         currentTaskIndex.value = newIndex;
     }
+
+    // Countdown de 3 segundos
+    cooldownInterval = setInterval(() => {
+        cooldownSeconds.value--;
+
+        if (cooldownSeconds.value <= 0) {
+            clearInterval(cooldownInterval);
+            isRandomizing.value = false;
+            cooldownSeconds.value = 0;
+            console.log(`✅ Cooldown terminado, botón habilitado`);
+        }
+    }, 1000);
 };
 
 // Seleccionar la tarea actual y cerrar modal
@@ -222,6 +249,12 @@ onMounted(() => {
 
 onUnmounted(() => {
     window.removeEventListener("keydown", handleKeydown);
+
+    // Limpiar interval de cooldown
+    if (cooldownInterval) {
+        clearInterval(cooldownInterval);
+    }
+
     // Limpiar elemento de precarga
     if (preloadElement.value) {
         preloadElement.value.src = "";
@@ -334,8 +367,14 @@ onUnmounted(() => {
                             <button
                                 class="random-btn"
                                 @click="randomizeTask"
-                                :disabled="tasksWithVideo.length <= 1"
-                                title="Ver otro video aleatorio"
+                                :disabled="
+                                    tasksWithVideo.length <= 1 || isRandomizing
+                                "
+                                :title="
+                                    isRandomizing
+                                        ? `Espera ${cooldownSeconds}s`
+                                        : 'Ver otro video aleatorio'
+                                "
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -352,7 +391,10 @@ onUnmounted(() => {
                                         d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
                                     />
                                 </svg>
-                                Otro video
+                                <span v-if="isRandomizing"
+                                    >Espera {{ cooldownSeconds }}s</span
+                                >
+                                <span v-else>Otro video</span>
                             </button>
                             <button
                                 class="select-btn"
