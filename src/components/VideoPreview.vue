@@ -62,6 +62,8 @@ const checkAndUpgradeToHD = async (url) => {
             body: JSON.stringify(payload),
         });
 
+        const data = await response.json();
+
         if (response.ok && data.status == 200) {
             console.log(`✨ HD version found, upgrading: ${hdUrl}`);
 
