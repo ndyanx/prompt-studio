@@ -40,6 +40,8 @@ watch(localUrlVideo, async (newUrl) => {
         await nextTick();
         videoRef.value.load();
     }
+    // Nota: No limpiamos errorMessage cuando newUrl está vacío
+    // porque podría ser un error válido que queremos mostrar
 });
 
 const handleLoaded = () => {
@@ -153,6 +155,8 @@ const extractVideoUrl = async (postUrl) => {
 const handleUrlInput = (event) => {
     const newUrl = event.target.value;
     localUrlPost.value = newUrl;
+    // Limpiar mensaje de error cuando el usuario modifica la URL
+    errorMessage.value = "";
 };
 
 const handleExtractVideo = () => {
