@@ -31,7 +31,7 @@ const lastTasksLength = ref(0);
 // Cache para verificaciones HD
 const hdCheckCache = new Map();
 
-// Verificar y actualizar a versión HD si existe
+// Verificar y actualizar a versión HD si existe usando la API de Grok
 const checkAndUpgradeToHD = async (url, task) => {
     // Si ya es HD, no hacer nada
     if (!url || url.includes("_hd.mp4")) {
@@ -43,13 +43,34 @@ const checkAndUpgradeToHD = async (url, task) => {
         return hdCheckCache.get(url);
     }
 
-    const hdUrl = url.replace(".mp4", "_hd.mp4");
+    // Si la tarea no tiene url_post, no podemos verificar HD con la API
+    if (!task.url_post || !task.url_post.trim()) {
+        console.log(`⚠️ No url_post available for task: ${task.name}`);
+        hdCheckCache.set(url, url);
+        return url;
+    }
 
     try {
+        // Extraer el ID del post de la URL
+        const postIdMatch = task.url_post.match(/\/post\/([a-f0-9-]+)/i);
+
+        if (!postIdMatch || !postIdMatch[1]) {
+            console.log(`⚠️ Invalid post URL format: ${task.url_post}`);
+            hdCheckCache.set(url, url);
+            return url;
+        }
+
+        const postId = postIdMatch[1];
+        console.log(`🔍 Checking HD version for: ${task.name}`);
+
+        // Crear el payload para la API de Grok
         const payload = {
-            url: hdUrl,
-            method: "HEAD",
+            url: "https://grok.com/rest/media/post/get",
+            method: "POST",
             impersonate: "chrome136",
+            json: {
+                id: postId,
+            },
         };
 
         const response = await fetch(VITE_PROXY_API, {
@@ -60,25 +81,46 @@ const checkAndUpgradeToHD = async (url, task) => {
             body: JSON.stringify(payload),
         });
 
-        const data = await response.json();
+        if (!response.ok) {
+            throw new Error("Error al obtener datos del post");
+        }
 
-        if (response.ok && data.status == 200) {
-            console.log(`✨ HD version found in album: ${task.name}`);
+        const responseData = await response.json();
+        const data = JSON.parse(responseData.data);
 
-            // Guardar en cache
-            hdCheckCache.set(url, hdUrl);
+        if (!data || !data.post) {
+            throw new Error("Respuesta inválida del servidor");
+        }
 
-            // Actualizar en DB usando usePromptManager
-            await updateTaskVideoUrl(task.id, hdUrl);
+        const post = data.post;
 
-            return hdUrl;
-        } else {
-            // Guardar en cache que no existe HD
+        // Verificar que sea un video
+        if (post.mediaType !== "MEDIA_POST_TYPE_VIDEO") {
+            console.log(`⚠️ Post is not a video: ${task.name}`);
             hdCheckCache.set(url, url);
             return url;
         }
+
+        // Verificar si existe hdMediaUrl
+        if (post.hdMediaUrl) {
+            console.log(`✨ HD version found in album: ${task.name}`);
+
+            // Guardar en cache
+            hdCheckCache.set(url, post.hdMediaUrl);
+
+            // Actualizar en DB usando usePromptManager
+            await updateTaskVideoUrl(task.id, post.hdMediaUrl);
+
+            return post.hdMediaUrl;
+        } else {
+            // No hay versión HD, usar la URL actual
+            console.log(`📹 Using SD version in album: ${task.name}`);
+            const videoUrl = post.mediaUrl || url;
+            hdCheckCache.set(url, videoUrl);
+            return videoUrl;
+        }
     } catch (error) {
-        console.log(`📹 Using SD version in album:`, error.message);
+        console.log(`📹 Error checking HD, using current URL:`, error.message);
         hdCheckCache.set(url, url);
         return url;
     }

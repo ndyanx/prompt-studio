@@ -149,10 +149,27 @@ const extractVideoUrl = async (postUrl) => {
     errorMessage.value = "";
 
     try {
+        // Extraer el ID del post de la URL
+        // Formato esperado: https://grok.com/imagine/post/38c15a4d-9aaf-45b2-8ff7-a6e099ea48f3
+        const postIdMatch = postUrl.match(/\/post\/([a-f0-9-]+)/i);
+
+        if (!postIdMatch || !postIdMatch[1]) {
+            throw new Error(
+                "URL inválida. Debe contener un ID de post válido.",
+            );
+        }
+
+        const postId = postIdMatch[1];
+        console.log(`📝 Extrayendo video del post: ${postId}`);
+
+        // Crear el payload para la API de Grok
         const payload = {
-            url: postUrl,
-            method: "GET",
+            url: "https://grok.com/rest/media/post/get",
+            method: "POST",
             impersonate: "chrome136",
+            json: {
+                id: postId,
+            },
         };
 
         const response = await fetch(VITE_PROXY_API, {
@@ -167,39 +184,52 @@ const extractVideoUrl = async (postUrl) => {
             throw new Error("Error al obtener el contenido del post");
         }
 
-        const data = await response.json();
+        const responseData = await response.json();
 
-        // Decodificar HTML entities
-        const htmlContent = data.data
-            .replace(/&quot;/g, '"')
-            .replace(/&amp;/g, "&")
-            .replace(/&lt;/g, "<")
-            .replace(/&gt;/g, ">")
-            .replace(/&#39;/g, "'");
+        // Parsear la respuesta JSON anidada
+        const data = JSON.parse(responseData.data);
 
-        // Buscar el meta tag og:video usando regex
-        const ogVideoMatch =
-            htmlContent.match(
-                /<meta[^>]*property=["']og:video["'][^>]*content=["']([^"']+)["']/i,
-            ) ||
-            htmlContent.match(
-                /<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:video["']/i,
-            );
+        // Validar que exista el objeto post
+        if (!data || !data.post) {
+            throw new Error("Respuesta inválida del servidor");
+        }
 
-        if (ogVideoMatch && ogVideoMatch[1]) {
-            localUrlVideo.value = ogVideoMatch[1];
-            emit("update-urls", {
-                url_post: postUrl,
-                url_video: ogVideoMatch[1],
-            });
-        } else {
-            errorMessage.value = "No se encontró video en este post";
+        const post = data.post;
+
+        // Verificar que sea un video
+        if (post.mediaType !== "MEDIA_POST_TYPE_VIDEO") {
+            errorMessage.value =
+                "Este post no contiene un video. Solo se aceptan posts de video.";
             localUrlVideo.value = "";
             emit("update-urls", { url_post: postUrl, url_video: "" });
+            return;
         }
+
+        // Obtener la URL del video (priorizar HD si existe)
+        let videoUrl = null;
+
+        if (post.hdMediaUrl) {
+            videoUrl = post.hdMediaUrl;
+            console.log("✨ Video HD encontrado");
+        } else if (post.mediaUrl) {
+            videoUrl = post.mediaUrl;
+            console.log("📹 Video SD encontrado");
+        } else {
+            throw new Error("No se encontró URL de video en el post");
+        }
+
+        // Actualizar el estado local y emitir evento
+        localUrlVideo.value = videoUrl;
+        emit("update-urls", {
+            url_post: postUrl,
+            url_video: videoUrl,
+        });
+
+        console.log(`✅ Video extraído exitosamente: ${videoUrl}`);
     } catch (error) {
         console.error("Error extracting video URL:", error);
         errorMessage.value =
+            error.message ||
             "Error al extraer el video. Verifica la URL del post.";
         localUrlVideo.value = "";
         emit("update-urls", { url_post: postUrl, url_video: "" });
