@@ -53,7 +53,12 @@ const handleLoaded = () => {
 };
 
 const extractVideoUrl = async (postUrl) => {
+    console.log("🔵 [INICIO] extractVideoUrl llamado");
+    console.log("🔵 [INICIO] postUrl:", postUrl);
+    console.log("🔵 [INICIO] errorMessage antes:", errorMessage.value);
+
     if (!postUrl.trim()) {
+        console.log("⚪ [VACIO] URL vacía, limpiando estado");
         localUrlVideo.value = "";
         errorMessage.value = "";
         return;
@@ -61,6 +66,7 @@ const extractVideoUrl = async (postUrl) => {
 
     isLoading.value = true;
     errorMessage.value = "";
+    console.log("🟢 [LIMPIEZA] errorMessage limpiado a:", errorMessage.value);
 
     try {
         // Extraer el ID del post de la URL
@@ -74,7 +80,7 @@ const extractVideoUrl = async (postUrl) => {
         }
 
         const postId = postIdMatch[1];
-        console.log(`📝 Extrayendo video del post: ${postId}`);
+        console.log(`📝 [ID] Post ID extraído: ${postId}`);
 
         // Crear el payload para la API de Grok
         const payload = {
@@ -84,7 +90,18 @@ const extractVideoUrl = async (postUrl) => {
             json: {
                 id: postId,
             },
+            headers: {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                Pragma: "no-cache",
+                Expires: "0",
+            },
         };
+
+        console.log(
+            "📤 [REQUEST] Enviando request con payload:",
+            JSON.stringify(payload, null, 2),
+        );
+        console.log("📤 [REQUEST] VITE_PROXY_API:", VITE_PROXY_API);
 
         const response = await fetch(VITE_PROXY_API, {
             method: "POST",
@@ -94,14 +111,24 @@ const extractVideoUrl = async (postUrl) => {
             body: JSON.stringify(payload),
         });
 
+        console.log("📥 [RESPONSE] Status:", response.status, response.ok);
+
         if (!response.ok) {
             throw new Error("Error al obtener el contenido del post");
         }
 
         const responseData = await response.json();
+        console.log("📥 [RESPONSE] responseData recibido");
+        console.log("📥 [RESPONSE] responseData.status:", responseData.status);
+        console.log(
+            "📥 [RESPONSE] responseData.data length:",
+            responseData.data?.length,
+        );
 
         // Parsear la respuesta JSON anidada
         const data = JSON.parse(responseData.data);
+        console.log("🔍 [PARSE] Data parseado exitosamente");
+        console.log("🔍 [PARSE] data.post existe?:", !!data.post);
 
         // Validar que exista el objeto post
         if (!data || !data.post) {
@@ -109,46 +136,72 @@ const extractVideoUrl = async (postUrl) => {
         }
 
         const post = data.post;
+        console.log("🎬 [POST] mediaType:", post.mediaType);
+        console.log("🎬 [POST] hdMediaUrl:", post.hdMediaUrl || "NO EXISTE");
+        console.log("🎬 [POST] mediaUrl:", post.mediaUrl || "NO EXISTE");
 
         // Verificar que sea un video
         if (post.mediaType !== "MEDIA_POST_TYPE_VIDEO") {
+            console.log(
+                "❌ [ERROR] No es un video, mediaType:",
+                post.mediaType,
+            );
             errorMessage.value =
                 "Este post no contiene un video. Solo se aceptan posts de video.";
+            console.log(
+                "❌ [ERROR] errorMessage establecido a:",
+                errorMessage.value,
+            );
             localUrlVideo.value = "";
             emit("update-urls", { url_post: postUrl, url_video: "" });
+            console.log("❌ [ERROR] Saliendo con return (NO es video)");
             return;
         }
+
+        console.log("✅ [VIDEO] Es un video, continuando...");
 
         // Obtener la URL del video (priorizar HD si existe)
         let videoUrl = null;
 
         if (post.hdMediaUrl) {
             videoUrl = post.hdMediaUrl;
-            console.log("✨ Video HD encontrado");
+            console.log("✨ [HD] Video HD encontrado:", videoUrl);
         } else if (post.mediaUrl) {
             videoUrl = post.mediaUrl;
-            console.log("📹 Video SD encontrado");
+            console.log("📹 [SD] Video SD encontrado:", videoUrl);
         } else {
+            console.log("❌ [ERROR] No hay hdMediaUrl ni mediaUrl");
             throw new Error("No se encontró URL de video en el post");
         }
 
         // Actualizar el estado local y emitir evento
+        console.log("💾 [UPDATE] Actualizando localUrlVideo a:", videoUrl);
         localUrlVideo.value = videoUrl;
         emit("update-urls", {
             url_post: postUrl,
             url_video: videoUrl,
         });
 
-        console.log(`✅ Video extraído exitosamente: ${videoUrl}`);
+        console.log(`✅ [EXITO] Video extraído exitosamente`);
+        console.log(`✅ [EXITO] errorMessage final:`, errorMessage.value);
     } catch (error) {
-        console.error("Error extracting video URL:", error);
+        console.error("❌ [CATCH] Error capturado:", error);
+        console.error("❌ [CATCH] Error.message:", error.message);
         errorMessage.value =
             error.message ||
             "Error al extraer el video. Verifica la URL del post.";
+        console.log(
+            "❌ [CATCH] errorMessage establecido a:",
+            errorMessage.value,
+        );
         localUrlVideo.value = "";
         emit("update-urls", { url_post: postUrl, url_video: "" });
     } finally {
         isLoading.value = false;
+        console.log("🏁 [FINALLY] isLoading = false");
+        console.log("🏁 [FINALLY] errorMessage final:", errorMessage.value);
+        console.log("🏁 [FINALLY] localUrlVideo final:", localUrlVideo.value);
+        console.log("═══════════════════════════════════════════════════════");
     }
 };
 
