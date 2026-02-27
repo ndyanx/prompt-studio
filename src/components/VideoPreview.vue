@@ -139,10 +139,20 @@ const extractVideoUrl = async (postUrl) => {
     }
 };
 
+let urlInputDebounce = null;
 const handleUrlInput = (event) => {
     const newUrl = event.target.value;
     localUrlPost.value = newUrl;
     errorMessage.value = "";
+    // Sincronizar con el composable aunque no se haya extraído el video,
+    // para que el slot se guarde aunque solo tenga url_post.
+    clearTimeout(urlInputDebounce);
+    urlInputDebounce = setTimeout(() => {
+        emit("update-urls", {
+            url_post: newUrl,
+            url_video: localUrlVideo.value,
+        });
+    }, 400);
 };
 
 const handleExtractVideo = () => {

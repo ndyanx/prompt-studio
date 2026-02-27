@@ -1,28 +1,34 @@
 import { ref, watch, onMounted, onUnmounted } from "vue";
-import { db, Task, initDB } from "../db/db";
+import { db, Task, initDB, normalizeTask } from "../db/db";
 import { supabase } from "../supabase/supabaseClient";
 
 const tasks = ref([]);
 const currentTask = ref(null);
 const promptText = ref("");
-const urlPost = ref("");
-const urlVideo = ref("");
+
+// Array de slots de media para la tarea activa.
+// Cada slot: { url_post: string, url_video: string }
+// Siempre tiene al menos un elemento (el slot por defecto).
+const mediaList = ref([{ url_post: "", url_video: "" }]);
 
 let initialized = false;
 let saveTimeout = null;
 
+// Helper: serializa mediaList a objeto plano seguro para Dexie (sin proxies Vue)
+const serializeMedia = () =>
+  mediaList.value.map((m) => ({
+    url_post: m.url_post || "",
+    url_video: m.url_video || "",
+  }));
+
 export function usePromptManager() {
-  // Limpia únicamente tasks_auth al cerrar sesión.
-  // tasks_local no se toca — esos datos persisten offline.
   const clearLocalData = async () => {
     try {
       await db.tasks_auth.clear();
-
       tasks.value = [];
       currentTask.value = null;
       promptText.value = "";
-      urlPost.value = "";
-      urlVideo.value = "";
+      mediaList.value = [{ url_post: "", url_video: "" }];
     } catch (error) {
       console.error("Error limpiando datos de sesión:", error);
     }
@@ -36,13 +42,9 @@ export function usePromptManager() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
       if (!session) {
-        // Sin sesión activa: cargar tareas offline inmediatamente
         await loadTasks();
       }
-      // Con sesión activa: useSyncManager restaura los datos desde Supabase
-      // y emite 'data-restored', que dispara reloadTasks()
 
       window.addEventListener("user-signed-out", clearLocalData);
       window.addEventListener("data-restored", reloadTasks);
@@ -50,7 +52,7 @@ export function usePromptManager() {
         await createNewTask();
       });
 
-      // Auto-guardado con debounce de 500ms al editar cualquier campo
+      // Auto-guardado con debounce 500ms
       watch(promptText, () => {
         if (currentTask.value) {
           clearTimeout(saveTimeout);
@@ -58,37 +60,38 @@ export function usePromptManager() {
         }
       });
 
-      watch(urlPost, () => {
-        if (currentTask.value) {
-          clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => saveCurrentTask(), 500);
-        }
-      });
-
-      watch(urlVideo, () => {
-        if (currentTask.value) {
-          clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => saveCurrentTask(), 500);
-        }
-      });
+      // Watch profundo sobre mediaList para detectar cambios en cualquier slot
+      watch(
+        mediaList,
+        () => {
+          if (currentTask.value) {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => saveCurrentTask(), 500);
+          }
+        },
+        { deep: true },
+      );
     }
   });
 
-  // Determina qué tabla usar según el estado de la sesión:
-  // autenticado → tasks_auth, offline → tasks_local
+  const getTable = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session ? "tasks_auth" : "tasks_local";
+  };
+
   const loadTasks = async (skipIfEmpty = false) => {
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
       let tableName;
+
       if (session) {
         tableName = "tasks_auth";
       } else {
         tableName = "tasks_local";
-
-        // Si hay datos en tasks_auth sin sesión activa, son huérfanos (ej. localStorage borrado)
         const authTasksCount = await db.tasks_auth.count();
         if (authTasksCount > 0) {
           console.warn("Datos huérfanos en tasks_auth detectados — limpiando");
@@ -101,7 +104,8 @@ export function usePromptManager() {
         .reverse()
         .toArray();
 
-      tasks.value = allTasks;
+      // Normalizar al vuelo por si hay tareas en formato v2 que no pasaron por la migración
+      tasks.value = allTasks.map(normalizeTask);
 
       if (tasks.value.length > 0) {
         await loadTask(tasks.value[0]);
@@ -116,20 +120,14 @@ export function usePromptManager() {
 
   const createNewTask = async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
-
+      const tableName = await getTable();
       const newTask = new Task({
         name: "Nueva Tarea",
         prompt: "Escribe tu prompt aquí.",
       });
-
       await db[tableName].add(newTask);
       tasks.value.unshift(newTask);
       await loadTask(newTask);
-
       return newTask;
     } catch (error) {
       console.error("Error creando tarea:", error);
@@ -138,36 +136,34 @@ export function usePromptManager() {
   };
 
   const loadTask = async (task) => {
-    currentTask.value = task;
-    promptText.value = task.prompt;
-    urlPost.value = task.url_post || "";
-    urlVideo.value = task.url_video || "";
+    const normalized = normalizeTask(task);
+    currentTask.value = normalized;
+    promptText.value = normalized.prompt;
+    // Copia profunda para evitar mutar directamente el objeto en tasks[]
+    mediaList.value = normalized.media.map((m) => ({ ...m }));
   };
 
   const saveCurrentTask = async () => {
     if (!currentTask.value) return;
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
+      const tableName = await getTable();
 
       currentTask.value.prompt = promptText.value;
-      currentTask.value.url_post = urlPost.value;
-      currentTask.value.url_video = urlVideo.value;
+      currentTask.value.media = serializeMedia();
       currentTask.value.updatedAt = Date.now();
 
-      // Se serializa a un objeto plano para evitar problemas con los proxies de Vue en Dexie
-      const taskToSave = {
-        id: currentTask.value.id,
-        name: currentTask.value.name,
-        prompt: currentTask.value.prompt,
-        url_post: currentTask.value.url_post,
-        url_video: currentTask.value.url_video,
-        createdAt: currentTask.value.createdAt,
-        updatedAt: currentTask.value.updatedAt,
-      };
+      // JSON.parse/stringify para garantizar objeto plano sin Proxies de Vue
+      const taskToSave = JSON.parse(
+        JSON.stringify({
+          id: currentTask.value.id,
+          name: currentTask.value.name,
+          prompt: currentTask.value.prompt,
+          media: serializeMedia(),
+          createdAt: currentTask.value.createdAt,
+          updatedAt: currentTask.value.updatedAt,
+        }),
+      );
 
       await db[tableName].put(taskToSave);
 
@@ -184,23 +180,20 @@ export function usePromptManager() {
     if (!currentTask.value) return;
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
-
+      const tableName = await getTable();
       currentTask.value.name = name;
       currentTask.value.updatedAt = Date.now();
 
-      const taskToSave = {
-        id: currentTask.value.id,
-        name: currentTask.value.name,
-        prompt: currentTask.value.prompt,
-        url_post: currentTask.value.url_post || "",
-        url_video: currentTask.value.url_video || "",
-        createdAt: currentTask.value.createdAt,
-        updatedAt: currentTask.value.updatedAt,
-      };
+      const taskToSave = JSON.parse(
+        JSON.stringify({
+          id: currentTask.value.id,
+          name: currentTask.value.name,
+          prompt: currentTask.value.prompt,
+          media: serializeMedia(),
+          createdAt: currentTask.value.createdAt,
+          updatedAt: currentTask.value.updatedAt,
+        }),
+      );
 
       await db[tableName].put(taskToSave);
 
@@ -209,17 +202,13 @@ export function usePromptManager() {
         tasks.value[index] = { ...currentTask.value };
       }
     } catch (error) {
-      console.error("Error actualizando nombre de tarea:", error);
+      console.error("Error actualizando nombre:", error);
     }
   };
 
   const deleteTask = async (taskId) => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
-
+      const tableName = await getTable();
       await db[tableName].delete(taskId);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
@@ -239,11 +228,7 @@ export function usePromptManager() {
 
   const deleteAllTasks = async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
-
+      const tableName = await getTable();
       await db[tableName].clear();
       tasks.value = [];
       await createNewTask();
@@ -255,21 +240,17 @@ export function usePromptManager() {
 
   const duplicateTask = async (task) => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
+      const tableName = await getTable();
+      const normalized = normalizeTask(task);
 
       const duplicate = new Task({
-        name: `${task.name} (copia)`,
-        prompt: task.prompt,
-        url_post: task.url_post || "",
-        url_video: task.url_video || "",
+        name: `${normalized.name} (copia)`,
+        prompt: normalized.prompt,
+        media: normalized.media.map((m) => ({ ...m })),
       });
 
       await db[tableName].add(duplicate);
       tasks.value.unshift(duplicate);
-
       return duplicate;
     } catch (error) {
       console.error("Error duplicando tarea:", error);
@@ -279,18 +260,14 @@ export function usePromptManager() {
 
   const exportTasks = async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
-
+      const tableName = await getTable();
       const allTasks = await db[tableName].toArray();
 
       const data = {
-        version: "2.0.0",
+        version: "3.0.0",
         exportedAt: Date.now(),
         source: tableName,
-        tasks: allTasks,
+        tasks: allTasks.map(normalizeTask),
       };
 
       const json = JSON.stringify(data, null, 2);
@@ -321,26 +298,23 @@ export function usePromptManager() {
             return;
           }
 
-          const {
-            data: { session },
-          } = await supabase.auth.getSession();
-          const tableName = session ? "tasks_auth" : "tasks_local";
-
-          // Se generan IDs nuevos para evitar colisiones con tareas existentes
+          const tableName = await getTable();
           const baseId = Date.now();
+
           const newTasks = data.tasks.map((task, index) => ({
             id: baseId + index,
             name: task.name || "Tarea importada",
             prompt: task.prompt || "",
-            url_post: task.url_post || "",
-            url_video: task.url_video || "",
+            media:
+              Array.isArray(task.media) && task.media.length > 0
+                ? task.media
+                : [{ url_post: "", url_video: "" }],
             createdAt: task.createdAt || Date.now(),
             updatedAt: task.updatedAt || Date.now(),
           }));
 
           await db[tableName].bulkAdd(newTasks);
           tasks.value.push(...newTasks);
-
           resolve(newTasks.length);
         } catch (error) {
           console.error("Error importando tareas:", error);
@@ -353,43 +327,75 @@ export function usePromptManager() {
     });
   };
 
-  const updateVideoUrls = ({ url_post, url_video }) => {
-    urlPost.value = url_post;
-    urlVideo.value = url_video;
+  // Actualiza un slot específico del mediaList activo.
+  // Llamado por VideoPreview cuando el usuario extrae un video o escribe una URL.
+  const updateMediaSlot = async (index, { url_post, url_video }) => {
+    if (index >= 0 && index < mediaList.value.length) {
+      mediaList.value[index] = { url_post, url_video };
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => saveCurrentTask(), 500);
+    }
   };
 
-  // Actualiza la URL de video de una tarea específica sin afectar otros campos.
-  // Usado por AlbumModal cuando se hace upgrade a versión HD.
-  const updateTaskVideoUrl = async (taskId, url_video) => {
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const tableName = session ? "tasks_auth" : "tasks_local";
+  // Agrega un nuevo slot vacío al final. Guarda inmediatamente sin esperar el debounce.
+  const addMediaSlot = async () => {
+    mediaList.value.push({ url_post: "", url_video: "" });
+    await saveCurrentTask();
+  };
 
+  // Elimina el slot en el índice dado. Guarda inmediatamente.
+  // Protegido: nunca borra si solo queda uno.
+  const removeMediaSlot = async (index) => {
+    if (mediaList.value.length <= 1) return;
+    mediaList.value.splice(index, 1);
+    await saveCurrentTask();
+  };
+
+  // Usado por AlbumModal para upgrade a HD de un slot específico.
+  // mediaIndex: qué slot de media actualizar (default 0 para compatibilidad).
+  const updateTaskVideoUrl = async (taskId, url_video, mediaIndex = 0) => {
+    try {
+      const tableName = await getTable();
       const task = tasks.value.find((t) => t.id === taskId);
       if (!task) {
         console.warn(`Tarea no encontrada: ${taskId}`);
         return;
       }
 
-      task.url_video = url_video;
-      task.updatedAt = Date.now();
+      const normalizedTask = normalizeTask(task);
+      if (!normalizedTask.media[mediaIndex]) return;
 
-      const taskToSave = {
-        id: task.id,
-        name: task.name,
-        prompt: task.prompt,
-        url_post: task.url_post,
-        url_video: url_video,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
+      normalizedTask.media[mediaIndex] = {
+        ...normalizedTask.media[mediaIndex],
+        url_video,
       };
+      normalizedTask.updatedAt = Date.now();
+
+      const taskToSave = JSON.parse(
+        JSON.stringify({
+          id: normalizedTask.id,
+          name: normalizedTask.name,
+          prompt: normalizedTask.prompt,
+          media: normalizedTask.media,
+          createdAt: normalizedTask.createdAt,
+          updatedAt: normalizedTask.updatedAt,
+        }),
+      );
 
       await db[tableName].put(taskToSave);
 
+      // Actualizar tasks[] en memoria
+      const index = tasks.value.findIndex((t) => t.id === taskId);
+      if (index !== -1) tasks.value[index] = normalizedTask;
+
+      // Si es la tarea activa, actualizar también mediaList
       if (currentTask.value?.id === taskId) {
-        urlVideo.value = url_video;
+        if (mediaList.value[mediaIndex]) {
+          mediaList.value[mediaIndex] = {
+            ...mediaList.value[mediaIndex],
+            url_video,
+          };
+        }
       }
     } catch (error) {
       console.error("Error actualizando URL de video:", error);
@@ -410,10 +416,10 @@ export function usePromptManager() {
     tasks,
     currentTask,
     promptText,
-    urlPost,
-    urlVideo,
+    mediaList,
     createNewTask,
     loadTask,
+    loadTasks,
     saveCurrentTask,
     updateTaskName,
     deleteTask,
@@ -421,7 +427,9 @@ export function usePromptManager() {
     duplicateTask,
     exportTasks,
     importTasks,
-    updateVideoUrls,
+    updateMediaSlot,
+    addMediaSlot,
+    removeMediaSlot,
     updateTaskVideoUrl,
     clearLocalData,
     reloadTasks,

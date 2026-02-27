@@ -2,15 +2,13 @@ import Dexie from "dexie";
 
 export const db = new Dexie("PromptStudioDB");
 
-// v1: schema original, se mantiene para la migración automática de Dexie
+// v1: schema original
 db.version(1).stores({
   tasks: "id, name, createdAt, updatedAt",
   settings: "key",
 });
 
-// v2: arquitectura de dos tablas separadas por tipo de sesión
-// - tasks_local: tareas offline, persisten siempre independientemente de la sesión
-// - tasks_auth: tareas del usuario autenticado, se limpian al cerrar sesión
+// v2: tablas separadas por tipo de sesión
 db.version(2)
   .stores({
     tasks: null,
@@ -25,20 +23,39 @@ db.version(2)
     }
   });
 
+// v3: agrega soporte para media como array de slots {url_post, url_video}
+db.version(3).stores({
+  tasks_local: "id, name, createdAt, updatedAt",
+  tasks_auth: "id, name, createdAt, updatedAt",
+  settings: "key",
+});
+
+// Normaliza cualquier tarea al formato actual.
+// Garantiza que media sea siempre un array con al menos un slot.
+export function normalizeTask(raw) {
+  return {
+    ...raw,
+    media:
+      Array.isArray(raw.media) && raw.media.length > 0
+        ? raw.media
+        : [{ url_post: "", url_video: "" }],
+  };
+}
+
 export class Task {
   constructor(data = {}) {
     this.id = data.id || Math.floor(Date.now() + Math.random() * 1000);
     this.name = data.name || "Nueva Tarea";
     this.prompt = data.prompt || "Escribe tu prompt aquí.";
-    this.url_post = data.url_post || "";
-    this.url_video = data.url_video || "";
+    this.media =
+      Array.isArray(data.media) && data.media.length > 0
+        ? data.media
+        : [{ url_post: "", url_video: "" }];
     this.createdAt = data.createdAt || Date.now();
     this.updatedAt = data.updatedAt || Date.now();
   }
 }
 
-// Migra tareas guardadas en localStorage (formato antiguo) a tasks_local en IndexedDB.
-// Solo se ejecuta si tasks_local está vacía, para no duplicar datos.
 export async function migrateFromLocalStorage() {
   const STORAGE_KEY = "prompt-studio-tasks";
 
@@ -52,18 +69,20 @@ export async function migrateFromLocalStorage() {
     const tasks = JSON.parse(stored);
     if (!Array.isArray(tasks) || tasks.length === 0) return false;
 
-    // Convertir fechas al nuevo formato numérico durante la migración
-    const normalized = tasks.map((task) => ({
-      ...task,
-      createdAt:
-        typeof task.createdAt === "string"
-          ? new Date(task.createdAt).getTime()
-          : task.createdAt || Date.now(),
-      updatedAt:
-        typeof task.updatedAt === "string"
-          ? new Date(task.updatedAt).getTime()
-          : task.updatedAt || Date.now(),
-    }));
+    const normalized = tasks.map((task) => {
+      const base = {
+        ...task,
+        createdAt:
+          typeof task.createdAt === "string"
+            ? new Date(task.createdAt).getTime()
+            : task.createdAt || Date.now(),
+        updatedAt:
+          typeof task.updatedAt === "string"
+            ? new Date(task.updatedAt).getTime()
+            : task.updatedAt || Date.now(),
+      };
+      return normalizeTask(base);
+    });
 
     await db.tasks_local.bulkAdd(normalized);
     return true;

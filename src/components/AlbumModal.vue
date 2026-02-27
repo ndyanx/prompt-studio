@@ -32,7 +32,7 @@ const hdCheckCache = new Map();
 
 // Consulta la API para obtener la versión HD del video si existe.
 // Actualiza la tarea en DB y el cache para evitar consultas repetidas.
-const checkAndUpgradeToHD = async (url, task) => {
+const checkAndUpgradeToHD = async (url, task, urlPost) => {
     if (!url || url.includes("_hd.mp4")) {
         return url;
     }
@@ -41,13 +41,14 @@ const checkAndUpgradeToHD = async (url, task) => {
         return hdCheckCache.get(url);
     }
 
-    if (!task.url_post || !task.url_post.trim()) {
+    const postUrl = urlPost || "";
+    if (!postUrl.trim()) {
         hdCheckCache.set(url, url);
         return url;
     }
 
     try {
-        const postIdMatch = task.url_post.match(/\/post\/([a-f0-9-]+)/i);
+        const postIdMatch = postUrl.match(/\/post\/([a-f0-9-]+)/i);
 
         if (!postIdMatch || !postIdMatch[1]) {
             hdCheckCache.set(url, url);
@@ -93,7 +94,15 @@ const checkAndUpgradeToHD = async (url, task) => {
 
         if (post.hdMediaUrl) {
             hdCheckCache.set(url, post.hdMediaUrl);
-            await updateTaskVideoUrl(task.id, post.hdMediaUrl);
+            // Actualizar el slot correcto: buscar por url_video coincidente
+            const mediaIndex = (task.media || []).findIndex(
+                (m) => m.url_video === url,
+            );
+            await updateTaskVideoUrl(
+                task.id,
+                post.hdMediaUrl,
+                mediaIndex >= 0 ? mediaIndex : 0,
+            );
             return post.hdMediaUrl;
         } else {
             const videoUrl = post.mediaUrl || url;
@@ -116,9 +125,26 @@ const tasksWithVideo = computed(() => {
         return tasksWithVideoCache.value;
     }
 
-    const filtered = props.tasks.filter(
-        (task) => task.url_video && task.url_video.trim() !== "",
-    );
+    // Normalizar y filtrar tareas que tengan al menos un slot con video
+    const filtered = props.tasks
+        .map((task) => {
+            // Compatibilidad con formato viejo {url_post, url_video}
+            if (!Array.isArray(task.media)) {
+                return {
+                    ...task,
+                    media: [
+                        {
+                            url_post: task.url_post || "",
+                            url_video: task.url_video || "",
+                        },
+                    ],
+                };
+            }
+            return task;
+        })
+        .filter((task) =>
+            task.media.some((m) => m.url_video && m.url_video.trim() !== ""),
+        );
 
     tasksWithVideoCache.value = filtered;
     lastTasksLength.value = props.tasks.length;
@@ -128,7 +154,17 @@ const tasksWithVideo = computed(() => {
 
 const currentTask = computed(() => {
     if (tasksWithVideo.value.length === 0) return null;
-    return tasksWithVideo.value[currentTaskIndex.value];
+    const task = tasksWithVideo.value[currentTaskIndex.value];
+    if (!task) return null;
+
+    // Elegir al azar uno de los slots con video de esta tarea
+    const validSlots = task.media.filter(
+        (m) => m.url_video && m.url_video.trim() !== "",
+    );
+    if (validSlots.length === 0) return null;
+
+    const slot = validSlots[Math.floor(Math.random() * validSlots.length)];
+    return { ...task, _activeSlot: slot };
 });
 
 const getRandomNextIndex = () => {
@@ -151,7 +187,16 @@ const preloadNextVideo = async () => {
     preloadedNextIndex.value = nextIndex;
     const nextTask = tasksWithVideo.value[nextIndex];
 
-    const videoUrl = await checkAndUpgradeToHD(nextTask.url_video, nextTask);
+    const nextSlots = nextTask.media.filter(
+        (m) => m.url_video && m.url_video.trim() !== "",
+    );
+    if (nextSlots.length === 0) return;
+    const nextSlot = nextSlots[Math.floor(Math.random() * nextSlots.length)];
+    const videoUrl = await checkAndUpgradeToHD(
+        nextSlot.url_video,
+        nextTask,
+        nextSlot.url_post,
+    );
 
     if (!preloadElement.value) {
         preloadElement.value = document.createElement("video");
@@ -330,8 +375,12 @@ onUnmounted(() => {
                         <!-- Video -->
                         <div class="album-video-container">
                             <video
-                                v-if="currentTask.url_video"
-                                :key="currentTask.id"
+                                v-if="currentTask._activeSlot?.url_video"
+                                :key="
+                                    currentTask.id +
+                                    '-' +
+                                    currentTask._activeSlot.url_video
+                                "
                                 loop
                                 muted
                                 autoplay
@@ -341,7 +390,7 @@ onUnmounted(() => {
                                 controls
                             >
                                 <source
-                                    :src="currentTask.url_video"
+                                    :src="currentTask._activeSlot.url_video"
                                     type="video/mp4"
                                 />
                                 Tu navegador no soporta la reproducción de
@@ -418,7 +467,7 @@ onUnmounted(() => {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.75);
-    /* backdrop-filter: blur(8px) eliminado — re-composición en cada paint */
+    /* backdrop-filter eliminado */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -473,9 +522,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition:
-        background 0.2s,
-        color 0.2s;
+    transition: all 0.2s;
 }
 
 .close-btn:hover {
@@ -597,10 +644,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition:
-        background 0.2s,
-        border-color 0.2s,
-        color 0.2s;
+    transition: all 0.2s;
     border: none;
 }
 

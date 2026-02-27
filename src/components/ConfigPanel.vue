@@ -7,8 +7,7 @@ const props = defineProps({
     currentTask: Object,
     isMobile: Boolean,
     allTasks: Array,
-    urlPost: String,
-    urlVideo: String,
+    mediaList: Array,
     showAlbum: Boolean,
 });
 
@@ -16,11 +15,11 @@ const emit = defineEmits([
     "update-task-name",
     "show-tasks",
     "export-tasks",
-    "update-video-urls",
     "show-album",
 ]);
 
-const { importTasks } = usePromptManager();
+const { importTasks, updateMediaSlot, addMediaSlot, removeMediaSlot } =
+    usePromptManager();
 
 const handleImport = async () => {
     const input = document.createElement("input");
@@ -40,10 +39,19 @@ const handleImport = async () => {
     input.click();
 };
 
+const duplicateMap = computed(() => {
+    if (!props.allTasks) return new Map();
+    const map = new Map();
+    for (const t of props.allTasks) {
+        const name = t.name.trim();
+        map.set(name, (map.get(name) || 0) + 1);
+    }
+    return map;
+});
+
 const duplicateCount = computed(() => {
-    if (!props.currentTask || !props.allTasks) return 0;
-    const taskName = props.currentTask.name.trim();
-    return props.allTasks.filter((t) => t.name.trim() === taskName).length;
+    if (!props.currentTask) return 0;
+    return duplicateMap.value.get(props.currentTask.name.trim()) || 0;
 });
 
 const hasDuplicates = computed(() => duplicateCount.value > 1);
@@ -191,13 +199,62 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
             </div>
         </header>
 
-        <VideoPreview
-            v-if="!showAlbum"
-            :url-post="urlPost"
-            :url-video="urlVideo"
-            :is-visible="true"
-            @update-urls="emit('update-video-urls', $event)"
-        />
+        <!-- Lista de slots de media -->
+        <div v-if="!showAlbum" class="media-list">
+            <div
+                v-for="(slot, index) in mediaList"
+                :key="index"
+                class="media-slot"
+            >
+                <!-- Cabecera del slot: solo visible cuando hay más de uno -->
+                <div v-if="mediaList.length > 1" class="slot-header">
+                    <span class="slot-label">Post {{ index + 1 }}</span>
+                    <button
+                        class="remove-slot-btn"
+                        @click="removeMediaSlot(index)"
+                        :disabled="mediaList.length <= 1"
+                        title="Eliminar este post"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
+                </div>
+
+                <VideoPreview
+                    :url-post="slot.url_post"
+                    :url-video="slot.url_video"
+                    :is-visible="true"
+                    @update-urls="updateMediaSlot(index, $event)"
+                />
+            </div>
+
+            <!-- Agregar nuevo slot -->
+            <button class="add-slot-btn" @click="addMediaSlot">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Agregar otro post
+            </button>
+        </div>
 
         <div class="mobile-spacer"></div>
     </main>
@@ -211,7 +268,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     padding: 30px;
     border-right: 1px solid var(--border-color);
     background: var(--bg-primary);
-    /*overflow-y: auto;*/
+    overflow-y: auto;
 }
 
 .config-side.mobile {
@@ -354,21 +411,88 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border-color: var(--accent);
 }
 
-.help-text {
-    margin-top: 12px;
-    padding: 12px;
-    background: var(--bg-secondary);
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--text-secondary);
-    line-height: 1.5;
+/* Media list */
+.media-list {
+    display: flex;
+    flex-direction: column;
 }
 
-.help-text code {
-    background: var(--card-bg);
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: "SF Mono", monospace;
+.media-slot {
+    display: flex;
+    flex-direction: column;
+}
+
+.slot-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0 4px;
+    margin-top: 6px;
+    border-top: 1px solid var(--border-color);
+}
+
+.slot-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.remove-slot-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    color: var(--text-secondary);
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
+    padding: 0;
+}
+
+.remove-slot-btn:hover:not(:disabled) {
+    background: rgba(255, 59, 48, 0.1);
+    border-color: rgba(255, 59, 48, 0.3);
+    color: #ff3b30;
+}
+
+.remove-slot-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.add-slot-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 16px;
+    padding: 10px;
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    border-radius: 10px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    transition:
+        background 0.2s,
+        border-color 0.2s,
+        color 0.2s;
+}
+
+.add-slot-btn:hover {
+    background: var(--hover-bg);
+    border-color: var(--accent);
     color: var(--accent);
 }
 
@@ -376,18 +500,15 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     .task-name-input {
         font-size: 22px;
     }
-
     .duplicate-warning {
         font-size: 11px;
         padding: 3px 6px;
     }
-
     .duplicate-message {
         font-size: 11px;
     }
 }
 
-/* Spacer para mobile - crea espacio extra al final */
 .mobile-spacer {
     height: 0;
     min-height: 0;

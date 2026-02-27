@@ -20,8 +20,7 @@ const {
     promptText,
     currentTask,
     tasks,
-    urlPost,
-    urlVideo,
+    mediaList,
     loadTask,
     loadTasks,
     createNewTask,
@@ -30,7 +29,6 @@ const {
     deleteAllTasks,
     duplicateTask,
     exportTasks,
-    updateVideoUrls,
 } = usePromptManager();
 
 const showTasks = ref(false);
@@ -125,15 +123,12 @@ const showPreview = computed(
                 :current-task="currentTask"
                 :all-tasks="tasks"
                 :is-mobile="isMobile"
-                :url-post="urlPost"
-                :url-video="urlVideo"
+                :media-list="mediaList"
                 :show-album="showAlbum"
                 @update-task-name="updateTaskName"
                 @show-tasks="showTasks = true"
                 @show-album="showAlbum = true"
                 @export-tasks="exportTasks"
-                @update-video-urls="updateVideoUrls"
-                :is-authenticated="isAuthenticated"
             />
 
             <PreviewPanel
