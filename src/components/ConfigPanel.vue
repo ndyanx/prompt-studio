@@ -40,21 +40,10 @@ const handleImport = async () => {
     input.click();
 };
 
-// Map precalculado en O(n) — mismo patrón que TasksPanel para evitar
-// recorrer el array completo cada vez que cambia currentTask.
-const duplicateMap = computed(() => {
-    if (!props.allTasks) return new Map();
-    const map = new Map();
-    for (const t of props.allTasks) {
-        const name = t.name.trim();
-        map.set(name, (map.get(name) || 0) + 1);
-    }
-    return map;
-});
-
 const duplicateCount = computed(() => {
-    if (!props.currentTask) return 0;
-    return duplicateMap.value.get(props.currentTask.name.trim()) || 0;
+    if (!props.currentTask || !props.allTasks) return 0;
+    const taskName = props.currentTask.name.trim();
+    return props.allTasks.filter((t) => t.name.trim() === taskName).length;
 });
 
 const hasDuplicates = computed(() => duplicateCount.value > 1);
@@ -294,7 +283,9 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border: 1px solid rgba(255, 149, 0, 0.3);
     flex-shrink: 0;
     cursor: help;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s;
 }
 
 .duplicate-warning:hover {
@@ -347,7 +338,10 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     display: flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
     color: var(--text-primary);
     font-size: 13px;
     font-weight: 500;

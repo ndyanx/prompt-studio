@@ -379,7 +379,10 @@ const handleManualSync = async () => {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition:
+        background 0.3s ease,
+        transform 0.3s ease,
+        border-color 0.3s ease;
     border: 2px solid transparent;
 }
 
@@ -551,7 +554,9 @@ const handleManualSync = async () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .close-details:hover {
@@ -683,7 +688,9 @@ const handleManualSync = async () => {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: all 0.3s ease;
+    transition:
+        background 0.2s,
+        opacity 0.2s;
     margin-top: 8px;
 }
 

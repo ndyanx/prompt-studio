@@ -520,8 +520,9 @@ const handleUserAction = () => {
     justify-content: space-between;
     padding: 0 24px;
     z-index: 1000;
-    backdrop-filter: blur(10px);
-    background: rgba(255, 255, 255, 0.9);
+    /* backdrop-filter eliminado — header permanente: el blur se recalcula
+       en cada paint de cualquier elemento debajo, incluyendo el textarea */
+    background: rgba(255, 255, 255, 0.95);
 }
 
 .dark-theme .app-header {
@@ -572,7 +573,10 @@ const handleUserAction = () => {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
     color: var(--text-primary);
     font-size: 14px;
     font-weight: 500;
@@ -670,7 +674,9 @@ const handleUserAction = () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .hamburger-btn:hover {
@@ -726,7 +732,9 @@ const handleUserAction = () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .close-sidebar-btn:hover {
@@ -809,7 +817,10 @@ const handleUserAction = () => {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
 }
 
 .sign-out-btn-mobile:hover {
@@ -829,7 +840,9 @@ const handleUserAction = () => {
     font-weight: 600;
     cursor: pointer;
     font-size: 14px;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .login-btn-mobile {
@@ -947,7 +960,10 @@ const handleUserAction = () => {
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1020,7 +1036,10 @@ const handleUserAction = () => {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
     display: flex;
     align-items: center;
     gap: 8px;

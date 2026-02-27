@@ -62,7 +62,9 @@ const emit = defineEmits(["change-view"]);
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition:
+        background 0.3s ease,
+        color 0.3s ease;
     box-shadow: 0 4px 16px rgba(0, 113, 227, 0.4);
     z-index: 999;
     width: 56px;

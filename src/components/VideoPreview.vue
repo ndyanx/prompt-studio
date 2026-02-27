@@ -359,7 +359,9 @@ const handleVideoError = () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+        opacity 0.2s,
+        background 0.2s;
     color: white;
     z-index: 10;
     opacity: 0.7;
@@ -392,7 +394,9 @@ const handleVideoError = () => {
     border: 1px solid var(--border-color);
     border-radius: 10px;
     margin-bottom: 10px;
-    transition: all 0.2s;
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
 }
 
 .url-input-container:focus-within {
@@ -429,7 +433,10 @@ const handleVideoError = () => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s,
+        color 0.2s;
     color: white;
     flex-shrink: 0;
 }
@@ -507,7 +514,9 @@ const handleVideoError = () => {
     overflow: hidden;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    transition: all 0.3s ease;
+    transition:
+        border-color 0.3s ease,
+        box-shadow 0.3s ease;
     position: relative;
 }
 

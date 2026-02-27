@@ -418,7 +418,7 @@ onUnmounted(() => {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(8px);
+    /* backdrop-filter: blur(8px) eliminado — re-composición en cada paint */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -473,7 +473,9 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .close-btn:hover {
@@ -595,7 +597,10 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s,
+        color 0.2s;
     border: none;
 }
 

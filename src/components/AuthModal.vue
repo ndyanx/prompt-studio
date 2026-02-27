@@ -227,7 +227,7 @@ const handleClose = () => {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(8px);
+    /* backdrop-filter: blur(8px) eliminado — re-composición en cada paint */
     z-index: 2000;
     display: flex;
     align-items: center;
@@ -257,7 +257,9 @@ const handleClose = () => {
     border-radius: 8px;
     cursor: pointer;
     color: var(--text-secondary);
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .close-btn:hover {
@@ -310,7 +312,9 @@ const handleClose = () => {
     color: var(--text-primary);
     font-size: 15px;
     outline: none;
-    transition: all 0.2s;
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
 }
 
 .form-group input:focus {
@@ -356,7 +360,10 @@ const handleClose = () => {
     font-weight: 600;
     font-size: 16px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        opacity 0.2s,
+        transform 0.2s;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -406,7 +413,9 @@ const handleClose = () => {
     cursor: pointer;
     padding: 4px;
     margin-left: 4px;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        color 0.2s;
 }
 
 .switch-mode-btn:hover {
