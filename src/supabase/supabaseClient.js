@@ -20,7 +20,7 @@ export async function initSupabase() {
       user: session?.user,
     };
   } catch (error) {
-    console.error("❌ Error inicializando Supabase:", error);
+    console.error("Error inicializando Supabase:", error);
     return { session: null, isAuthenticated: false, user: null };
   }
 }

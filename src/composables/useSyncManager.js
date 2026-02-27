@@ -3,13 +3,14 @@ import { supabase } from "../supabase/supabaseClient";
 import { db } from "../db/db";
 
 const MAX_RETRIES = 3;
-const THROTTLE_TIME = 10000; // 10 segundos
+const THROTTLE_TIME = 10000; // 10 segundos entre sincronizaciones manuales
 let isSyncing = false;
 let retryCount = 0;
 let throttleTimeout = null;
-let isRestoringData = false; // Flag para prevenir múltiples restauraciones
+let isRestoringData = false;
 
-// Estado compartido (singleton)
+// Estado compartido como singleton para que múltiples componentes
+// lean el mismo estado sin duplicar listeners ni lógica
 const lastSyncTime = ref(null);
 const isSyncingNow = ref(false);
 const syncError = ref(null);
@@ -18,48 +19,40 @@ const isOffline = ref(!navigator.onLine);
 const isThrottled = ref(false);
 const throttleSecondsRemaining = ref(0);
 
-// Flag para controlar si ya se inicializó
 let isInitialized = false;
 let cleanupFunctions = [];
 
 export function useSyncManager() {
+  // Solo se sincronizan datos de tasks_auth (usuario autenticado).
+  // tasks_local es offline-only y nunca se envía a Supabase.
   const generateSnapshot = async () => {
     try {
-      // Solo sincronizar tasks_auth (datos autenticados)
-      // tasks_local NO se sincronizan con Supabase (son offline-only)
       const allTasks = await db.tasks_auth.toArray();
       const settings = await db.settings.toArray();
 
       return {
         version: "2.0.0",
         timestamp: new Date().toISOString(),
-        tasks: allTasks, // Solo tasks_auth
+        tasks: allTasks,
         settings: settings,
         stats: {
           totalTasks: allTasks.length,
-          totalColors: allTasks.reduce(
-            (sum, task) => sum + Object.keys(task.colors || {}).length,
-            0,
-          ),
         },
       };
     } catch (error) {
-      console.error("❌ Error generando snapshot:", error);
+      console.error("Error generando snapshot:", error);
       throw error;
     }
   };
 
-  // Iniciar countdown de throttle
+  // Bloquea sincronizaciones adicionales durante THROTTLE_TIME segundos
+  // para evitar escrituras excesivas en Supabase
   const startThrottle = () => {
     isThrottled.value = true;
     throttleSecondsRemaining.value = 10;
 
-    // Limpiar timeout anterior si existe
-    if (throttleTimeout) {
-      clearInterval(throttleTimeout);
-    }
+    if (throttleTimeout) clearInterval(throttleTimeout);
 
-    // Countdown cada segundo
     throttleTimeout = setInterval(() => {
       throttleSecondsRemaining.value--;
 
@@ -76,11 +69,7 @@ export function useSyncManager() {
     if (isSyncing)
       return { success: false, error: "Sincronización en progreso" };
 
-    // Verificar throttle
     if (isThrottled.value) {
-      console.log(
-        `⏳ Throttle activo: espera ${throttleSecondsRemaining.value} segundos más`,
-      );
       return {
         success: false,
         error: `Espera ${throttleSecondsRemaining.value} segundos`,
@@ -88,20 +77,14 @@ export function useSyncManager() {
       };
     }
 
-    // Solo sincronizar si es manual (ya no hay sync automático)
     if (!isManual)
       return { success: false, error: "Solo sincronización manual" };
 
-    // Verificar si hay conexión a internet
     if (!navigator.onLine || isOffline.value) {
       syncError.value = "Sin conexión a internet";
-      console.log("📡 Sin conexión a internet - sync cancelado");
-
-      // Mostrar error por 3 segundos
       setTimeout(() => {
         syncError.value = null;
       }, 3000);
-
       return { success: false, error: "Sin conexión a internet" };
     }
 
@@ -111,19 +94,14 @@ export function useSyncManager() {
     syncSuccess.value = false;
 
     try {
-      // Verificar autenticación
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session) {
-        throw new Error("Usuario no autenticado");
-      }
+      if (!session) throw new Error("Usuario no autenticado");
 
-      // Generar snapshot
       const snapshot = await generateSnapshot();
 
-      // Subir a Supabase
-      const { data, error } = await supabase.from("user_snapshots").upsert(
+      const { error } = await supabase.from("user_snapshots").upsert(
         {
           user_id: session.user.id,
           snapshot_data: snapshot,
@@ -134,36 +112,25 @@ export function useSyncManager() {
             sync_method: "manual",
           },
         },
-        {
-          onConflict: "user_id",
-        },
+        { onConflict: "user_id" },
       );
 
       if (error) throw error;
 
-      // Éxito
       lastSyncTime.value = new Date().toISOString();
       retryCount = 0;
       syncSuccess.value = true;
 
-      console.log("✅ Snapshot sincronizado manualmente:", {
-        tasks: snapshot.tasks.length,
-        time: lastSyncTime.value,
-      });
-
-      // Iniciar throttle de 10 segundos
       startThrottle();
 
-      // Resetear animación de éxito después de 2 segundos
       setTimeout(() => {
         syncSuccess.value = false;
       }, 2000);
 
       return { success: true, tasks: snapshot.tasks.length };
     } catch (error) {
-      console.error("❌ Error en sync:", error);
+      console.error("Error en sync:", error);
 
-      // Determinar tipo de error
       let errorMessage = error.message;
       if (!navigator.onLine) {
         errorMessage = "Sin conexión a internet";
@@ -175,17 +142,11 @@ export function useSyncManager() {
 
       syncError.value = errorMessage;
 
-      // Reintento exponencial solo para sync manual (excepto offline)
-      if (!navigator.onLine) {
-        console.log("📡 Error de conexión - no se reintentará");
-      } else {
+      // Reintento con backoff exponencial, solo cuando hay conexión
+      if (navigator.onLine) {
         retryCount++;
         if (retryCount <= MAX_RETRIES && isManual) {
           const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-          console.log(
-            `🔄 Reintento ${retryCount}/${MAX_RETRIES} en ${delay}ms`,
-          );
-
           setTimeout(() => {
             syncToSupabase(true);
           }, delay);
@@ -200,15 +161,14 @@ export function useSyncManager() {
   };
 
   const manualSync = async () => {
-    console.log("🔄 Sincronización manual solicitada");
     return await syncToSupabase(true);
   };
 
+  // Descarga el snapshot más reciente desde Supabase y lo escribe en tasks_auth.
+  // Limpia tasks_auth antes de restaurar para evitar duplicados.
   const restoreFromSupabase = async () => {
     try {
-      // Verificar conexión
       if (!navigator.onLine || isOffline.value) {
-        console.log("📡 Sin conexión - usando datos locales");
         return {
           success: false,
           error: "Sin conexión a internet",
@@ -221,8 +181,6 @@ export function useSyncManager() {
       } = await supabase.auth.getSession();
       if (!session) throw new Error("Usuario no autenticado");
 
-      console.log("📥 Restaurando datos desde Supabase...");
-
       const { data, error } = await supabase
         .from("user_snapshots")
         .select("snapshot_data")
@@ -232,45 +190,32 @@ export function useSyncManager() {
         .single();
 
       if (error) {
-        // Si no hay datos, no es un error crítico
         if (error.code === "PGRST116") {
-          console.log("ℹ️ No hay snapshots guardados en Supabase");
           return { success: false, message: "No hay snapshots guardados" };
         }
         throw error;
       }
 
-      if (!data) {
+      if (!data)
         return { success: false, message: "No hay snapshots guardados" };
-      }
 
       const snapshot = data.snapshot_data;
 
-      // 🔥 IMPORTANTE: Limpiar tasks_auth ANTES de restaurar
-      // Esto previene datos duplicados o mezclados
       await db.tasks_auth.clear();
 
-      // Restaurar a tasks_auth (NO a tasks_local)
       if (snapshot.tasks && snapshot.tasks.length > 0) {
         await db.tasks_auth.bulkAdd(snapshot.tasks);
       }
 
-      console.log(
-        "✅ Snapshot restaurado a tasks_auth:",
-        snapshot.tasks.length,
-        "tareas",
-      );
       return {
         success: true,
         tasks: snapshot.tasks.length,
         timestamp: snapshot.timestamp,
       };
     } catch (error) {
-      console.error("❌ Error restaurando snapshot:", error);
+      console.error("Error restaurando snapshot:", error);
 
-      // Si es error de conexión, usar datos locales
       if (!navigator.onLine) {
-        console.log("📡 Error de conexión - usando datos locales");
         return {
           success: false,
           error: "Sin conexión a internet",
@@ -282,7 +227,6 @@ export function useSyncManager() {
     }
   };
 
-  // Detener sync cuando el usuario cierra sesión
   const handleSignOut = () => {
     lastSyncTime.value = null;
     syncError.value = null;
@@ -290,104 +234,72 @@ export function useSyncManager() {
     retryCount = 0;
     isThrottled.value = false;
     throttleSecondsRemaining.value = 0;
-    isRestoringData = false; // Resetear flag de restauración
+    isRestoringData = false;
+
     if (throttleTimeout) {
       clearInterval(throttleTimeout);
       throttleTimeout = null;
     }
-    console.log("🔒 Sync reiniciado por cierre de sesión");
 
-    // 🔄 Emitir evento para recargar tasks_local
-    // Esto hace que usePromptManager recargue las tareas offline
+    // Pequeño delay para que clearLocalData() en usePromptManager termine antes de recargar
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent("data-restored"));
-      console.log("📱 Recargando tasks_local después de logout");
-    }, 100); // Pequeño delay para que clearLocalData() termine primero
+    }, 100);
   };
 
-  // Manejar reconexión a internet
   const handleOnline = () => {
-    console.log("🌐 Conexión a internet restaurada");
     isOffline.value = false;
     syncError.value = null;
   };
 
   const handleOffline = () => {
-    console.log("📡 Sin conexión a internet");
     isOffline.value = true;
   };
 
-  // Restaurar automáticamente al iniciar sesión
+  // Al iniciar sesión, restaura los datos desde Supabase y notifica a usePromptManager.
+  // El flag isRestoringData previene ejecuciones simultáneas si el evento se dispara más de una vez.
   const handleSignIn = async () => {
-    // Prevenir múltiples ejecuciones simultáneas
-    if (isRestoringData) {
-      console.log("⏭️ Ya hay una restauración en progreso, omitiendo...");
-      return;
-    }
+    if (isRestoringData) return;
 
     isRestoringData = true;
-    console.log("🔑 Iniciando sesión, restaurando datos desde Supabase...");
 
     try {
       const result = await restoreFromSupabase();
 
       if (result.offline) {
-        // Sin conexión, usar datos locales
-        console.log("📱 Modo offline - usando datos locales (tasks_local)");
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else if (result.success && result.tasks > 0) {
-        console.log(
-          `✅ ${result.tasks} tareas restauradas a tasks_auth desde Supabase`,
-        );
-        // Emitir evento para que usePromptManager recargue las tareas
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else if (result.success && result.tasks === 0) {
-        // No hay tareas en Supabase, verificar tasks_auth local
-        console.log("ℹ️ No hay tareas en Supabase");
         const authTasks = await db.tasks_auth.count();
         if (authTasks === 0) {
-          console.log("📝 Creando tarea por defecto en tasks_auth");
           window.dispatchEvent(new CustomEvent("create-default-task"));
         } else {
-          console.log(`📋 Usando ${authTasks} tareas de tasks_auth local`);
           window.dispatchEvent(new CustomEvent("data-restored"));
         }
       } else {
-        // No hay snapshot en Supabase, verificar tareas auth locales
-        console.log("ℹ️ No hay snapshot en Supabase");
         const authTasks = await db.tasks_auth.count();
         if (authTasks === 0) {
-          console.log("📝 Creando tarea por defecto en tasks_auth");
           window.dispatchEvent(new CustomEvent("create-default-task"));
         } else {
-          console.log(`📋 Usando ${authTasks} tareas de tasks_auth local`);
           window.dispatchEvent(new CustomEvent("data-restored"));
         }
       }
     } catch (error) {
-      console.error("❌ Error restaurando datos:", error);
-      // No romper la app, usar datos locales si existen
+      console.error("Error restaurando datos al iniciar sesión:", error);
       const authTasks = await db.tasks_auth.count();
       if (authTasks > 0) {
-        console.log(
-          `📋 Error en restauración, usando ${authTasks} tareas de tasks_auth`,
-        );
         window.dispatchEvent(new CustomEvent("data-restored"));
       } else {
-        console.log(
-          "📝 Error en restauración y sin tareas en tasks_auth, creando tarea por defecto",
-        );
         window.dispatchEvent(new CustomEvent("create-default-task"));
       }
     } finally {
-      // Resetear el flag después de un pequeño delay para evitar race conditions
       setTimeout(() => {
         isRestoringData = false;
       }, 1000);
     }
   };
 
-  // Al montar el componente, verificar si hay sesión activa y restaurar
   const initSync = async () => {
     try {
       const {
@@ -395,54 +307,36 @@ export function useSyncManager() {
       } = await supabase.auth.getSession();
 
       if (session) {
-        console.log("✅ Sesión activa detectada, restaurando datos...");
         await handleSignIn();
       } else {
-        console.log("ℹ️ No hay sesión activa");
-
-        // 🐛 FIX DEL BUG: Si no hay sesión, limpiar tasks_auth
-        // Esto previene mostrar datos de un usuario anterior si borró el localStorage
+        // Sin sesión: verificar si hay datos huérfanos en tasks_auth
+        // (puede ocurrir si el usuario borró el localStorage manualmente)
         const authTasksCount = await db.tasks_auth.count();
         if (authTasksCount > 0) {
           console.warn(
-            `⚠️ Datos huérfanos en tasks_auth detectados (${authTasksCount} tareas) - limpiando`,
+            `Datos huérfanos en tasks_auth (${authTasksCount} tareas) — limpiando`,
           );
           await db.tasks_auth.clear();
-          console.log("✅ tasks_auth limpiada, se usarán tasks_local");
         }
 
-        // Verificar si tasks_local tiene datos, si no crear tarea por defecto
         const localTasksCount = await db.tasks_local.count();
         if (localTasksCount === 0) {
-          console.log(
-            "📝 No hay tareas en tasks_local, creando tarea por defecto",
-          );
           window.dispatchEvent(new CustomEvent("create-default-task"));
-        } else {
-          console.log(
-            `📱 Usuario offline con ${localTasksCount} tareas en tasks_local`,
-          );
         }
       }
     } catch (error) {
-      console.error("❌ Error inicializando sync:", error);
-      // No romper la app, continuar con datos locales
+      console.error("Error inicializando sync:", error);
     }
   };
 
   onMounted(async () => {
-    // Solo inicializar una vez, sin importar cuántos componentes usen el composable
     if (!isInitialized) {
       isInitialized = true;
-      console.log("🚀 Inicializando useSyncManager (singleton)");
 
-      // Inicializar estado de conexión
       isOffline.value = !navigator.onLine;
 
-      // Inicializar y restaurar si hay sesión
       await initSync();
 
-      // Agregar listeners
       window.addEventListener("user-signed-out", handleSignOut);
       window.addEventListener("user-signed-in", handleSignIn);
       window.addEventListener("online", handleOnline);
@@ -451,8 +345,6 @@ export function useSyncManager() {
   });
 
   onUnmounted(() => {
-    // Registrar función de cleanup pero no ejecutarla aún
-    // Solo limpiar cuando TODOS los componentes se desmonten
     const cleanup = () => {
       if (throttleTimeout) {
         clearInterval(throttleTimeout);
@@ -465,7 +357,6 @@ export function useSyncManager() {
       window.removeEventListener("offline", handleOffline);
 
       isInitialized = false;
-      console.log("🧹 useSyncManager limpiado");
     };
 
     cleanupFunctions.push(cleanup);
@@ -477,8 +368,8 @@ export function useSyncManager() {
     syncError,
     syncSuccess,
     isOffline,
-    isThrottled, // Nuevo: exponer estado de throttle
-    throttleSecondsRemaining, // Nuevo: exponer segundos restantes
+    isThrottled,
+    throttleSecondsRemaining,
     manualSync,
     restoreFromSupabase,
   };

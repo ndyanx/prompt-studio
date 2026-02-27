@@ -1,44 +1,61 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 
 const props = defineProps({
     promptText: String,
-    finalPrompt: String,
-    parsedColors: Array,
-    colorSelections: Object,
     isMobile: Boolean,
 });
 
 const emit = defineEmits(["update-prompt"]);
 
 const copyButtonText = ref("Copiar");
-const isEditing = ref(true);
 
-const promptStats = computed(() => {
-    const text = props.finalPrompt;
-    return {
-        characters: text.length,
-        words: text.split(/\s+/).filter((w) => w.length > 0).length,
-        lines: text.split("\n").length,
-        colors: props.parsedColors.length,
-    };
-});
+// Ref local para el valor visual del textarea.
+// Se actualiza inmediatamente en cada keystroke para que el cursor no salte,
+// pero la emisión al padre (que dispara reactividad global) va debounceada.
+const localText = ref(props.promptText || "");
 
-const highlightedPrompt = computed(() => {
-    let text = props.promptText;
-    props.parsedColors.forEach(({ placeholder, key }) => {
-        const color = props.colorSelections[key];
-        text = text.replace(
-            placeholder,
-            `<span class="color-highlight" style="color: ${color}; border-bottom: 2px solid ${color}">${placeholder}</span>`,
-        );
-    });
-    return text;
-});
+// Sincronizar si el padre cambia el texto (ej. al cargar otra tarea)
+watch(
+    () => props.promptText,
+    (newVal) => {
+        if (newVal !== localText.value) {
+            localText.value = newVal;
+        }
+    },
+);
+
+// Stats calculados sobre la ref local con debounce propio:
+// no necesitan ser exactos al milisegundo, solo al pausar.
+const promptStats = ref({ characters: 0, words: 0, lines: 0 });
+
+let statsDebounce = null;
+const updateStats = (text) => {
+    clearTimeout(statsDebounce);
+    statsDebounce = setTimeout(() => {
+        promptStats.value = {
+            characters: text.length,
+            words: text.split(/\s+/).filter((w) => w.length > 0).length,
+            lines: text.split("\n").length,
+        };
+    }, 300);
+};
+
+// Inicializar stats al montar
+updateStats(localText.value);
+
+let inputDebounce = null;
+const handleInput = (e) => {
+    const val = e.target.value;
+    localText.value = val; // Actualización visual inmediata (no reactiva global)
+    updateStats(val); // Stats con debounce 300ms
+    clearTimeout(inputDebounce);
+    inputDebounce = setTimeout(() => emit("update-prompt", val), 150); // Emisión al padre 150ms
+};
 
 const copyToClipboard = async () => {
     try {
-        await navigator.clipboard.writeText(props.finalPrompt);
+        await navigator.clipboard.writeText(localText.value);
         copyButtonText.value = "✓ Copiado";
         setTimeout(() => {
             copyButtonText.value = "Copiar";
@@ -53,62 +70,22 @@ const copyToClipboard = async () => {
     <aside class="preview-side" :class="{ mobile: isMobile }">
         <div class="preview-content">
             <div class="card-header">
-                <div class="card-tag">
-                    <button
-                        @click="isEditing = !isEditing"
-                        class="toggle-mode"
-                        :class="{ active: isEditing }"
-                    >
-                        ✎ Editar
-                    </button>
-                    <button
-                        @click="isEditing = !isEditing"
-                        class="toggle-mode"
-                        :class="{ active: !isEditing }"
-                    >
-                        👁 Previa
-                    </button>
-                </div>
-
                 <div class="stats">
                     <span class="stat-item"
                         >{{ promptStats.characters }}ch</span
                     >
                     <span class="stat-item">{{ promptStats.words }}p</span>
-                    <span class="stat-item">{{ promptStats.colors }}c</span>
+                    <span class="stat-item">{{ promptStats.lines }}l</span>
                 </div>
             </div>
 
             <div class="prompt-scroll">
                 <textarea
-                    v-if="isEditing"
-                    :value="promptText"
-                    @input="emit('update-prompt', $event.target.value)"
+                    :value="localText"
+                    @input="handleInput"
                     class="prompt-editor"
-                    placeholder="Escribe tu prompt aquí...
-
-Usa {color} o {color:nombre}
-
-Ejemplo:
-Gato {color:pelaje} con ojos {color:ojos}"
+                    placeholder="Escribe tu prompt aquí..."
                 ></textarea>
-
-                <div v-else class="prompt-preview">
-                    <div class="preview-section">
-                        <div class="preview-label">Con placeholders:</div>
-                        <div
-                            class="prompt-content"
-                            v-html="highlightedPrompt"
-                        ></div>
-                    </div>
-
-                    <!-- <div class="preview-section">
-                        <div class="preview-label">Final:</div>
-                        <div class="prompt-content final-content">
-                            {{ finalPrompt }}
-                        </div>
-                    </div> -->
-                </div>
             </div>
 
             <div class="action-buttons">
@@ -138,7 +115,6 @@ Gato {color:pelaje} con ojos {color:ojos}"
                 </button>
             </div>
 
-            <!-- Spacer para mobile -->
             <div class="mobile-spacer"></div>
         </div>
     </aside>
@@ -148,8 +124,8 @@ Gato {color:pelaje} con ojos {color:ojos}"
 .preview-side {
     flex: 0 0 40%;
     background: var(--bg-secondary);
-    padding: 40px;
-    overflow-y: auto;
+    padding: 10px;
+    /*overflow-y: auto;*/
 }
 
 .preview-side.mobile {
@@ -169,32 +145,7 @@ Gato {color:pelaje} con ojos {color:ojos}"
 }
 
 .card-header {
-    margin-bottom: 20px;
-}
-
-.card-tag {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-}
-
-.toggle-mode {
-    flex: 1;
-    padding: 8px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-    background: transparent;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    color: var(--text-secondary);
-}
-
-.toggle-mode.active {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
+    margin-bottom: 16px;
 }
 
 .stats {
@@ -221,8 +172,8 @@ Gato {color:pelaje} con ojos {color:ojos}"
 }
 
 .prompt-editor {
+    flex: 1;
     width: 100%;
-    height: 100%;
     min-height: 300px;
     padding: 16px;
     border: 1px solid var(--border-color);
@@ -240,46 +191,6 @@ Gato {color:pelaje} con ojos {color:ojos}"
 .prompt-editor:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.1);
-}
-
-.prompt-editor,
-.prompt-preview {
-    flex: 1;
-    min-height: 300px; /* Establecer una altura mínima coherente para ambos */
-    display: flex;
-    flex-direction: column;
-}
-
-.preview-section {
-    padding: 16px;
-    background: var(--bg-secondary);
-    border-radius: 12px;
-    border: 1px solid var(--border-color);
-}
-
-.preview-label {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    margin-bottom: 12px;
-}
-
-.prompt-content {
-    font-size: 13px;
-    line-height: 1.8;
-    color: var(--text-primary);
-    white-space: pre-wrap;
-    word-break: break-word;
-    font-family: "SF Mono", Monaco, monospace;
-}
-
-.prompt-content :deep(.color-highlight) {
-    font-weight: 700;
-    padding: 2px 4px;
-    border-radius: 4px;
-    background: rgba(10, 132, 255, 0.1);
 }
 
 .action-buttons {
@@ -314,7 +225,6 @@ Gato {color:pelaje} con ojos {color:ojos}"
     transform: translateY(0);
 }
 
-/* Spacer para mobile - crea espacio extra al final */
 .mobile-spacer {
     height: 0;
     min-height: 0;
@@ -330,10 +240,6 @@ Gato {color:pelaje} con ojos {color:ojos}"
 @media (max-width: 768px) {
     .prompt-editor {
         font-size: 13px;
-    }
-
-    .prompt-content {
-        font-size: 12px;
     }
 }
 </style>

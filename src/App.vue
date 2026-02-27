@@ -16,9 +16,23 @@ import { useSyncManager } from "./composables/useSyncManager";
 const { isDark, toggleTheme } = useTheme();
 const { user, isAuthenticated, signOut } = useAuth();
 const { restoreFromSupabase, manualSync } = useSyncManager();
-const promptManager = usePromptManager();
+const {
+    promptText,
+    currentTask,
+    tasks,
+    urlPost,
+    urlVideo,
+    loadTask,
+    loadTasks,
+    createNewTask,
+    updateTaskName,
+    deleteTask,
+    deleteAllTasks,
+    duplicateTask,
+    exportTasks,
+    updateVideoUrls,
+} = usePromptManager();
 
-const activeSlot = ref(null);
 const showTasks = ref(false);
 const showAlbum = ref(false);
 const isMobile = ref(false);
@@ -26,7 +40,6 @@ const activeView = ref("config");
 const showAuthModal = ref(false);
 const authModalMode = ref("login");
 
-// ✅ OPTIMIZACIÓN: Debounce en resize listener
 let resizeTimeout = null;
 
 const checkMobile = () => {
@@ -42,12 +55,10 @@ onMounted(async () => {
     checkMobile();
     window.addEventListener("resize", debouncedCheckMobile);
 
-    // Restaurar desde Supabase si está autenticado
     if (isAuthenticated.value) {
         const result = await restoreFromSupabase();
         if (result.success) {
-            console.log(`🔄 ${result.tasks} tareas restauradas`);
-            await promptManager.loadTasks();
+            await loadTasks();
         }
     }
 });
@@ -57,46 +68,16 @@ onUnmounted(() => {
     clearTimeout(resizeTimeout);
 });
 
-// Vigilar cambios en parsedColors para cerrar la paleta si el color activo ya no existe
-watch(
-    () => promptManager.parsedColors.value,
-    (newColors) => {
-        if (activeSlot.value) {
-            const stillExists = newColors.some(
-                (color) => color.key === activeSlot.value,
-            );
-            if (!stillExists) {
-                activeSlot.value = null;
-            }
-        }
-    },
-    { deep: true },
-);
-
-// Watcher para autenticación
 watch(isAuthenticated, (newVal) => {
     if (newVal) {
-        console.log("✅ Usuario autenticado, sync activado");
         showAuthModal.value = false;
     }
 });
 
-// Función para manejar el click en tabs con toggle
-const handleTabClick = (key) => {
-    if (activeSlot.value === key) {
-        activeSlot.value = null;
-    } else {
-        activeSlot.value = key;
-    }
-};
-
-// Manejo de auth
 const handleAuthSuccess = async (user) => {
-    console.log("✅ Auth exitosa:", user.email);
     const result = await restoreFromSupabase();
     if (result.success) {
-        console.log(`🔄 ${result.tasks} tareas restauradas`);
-        await promptManager.loadTasks();
+        await loadTasks();
     }
 };
 
@@ -107,17 +88,14 @@ const handleOpenAuth = (mode = "login") => {
 
 const handleSignOut = async () => {
     await signOut();
-    console.log("👋 Usuario desconectado");
 };
 
 const handleSyncNow = async () => {
-    console.log("🔄 Sincronización manual desde mobile");
     await manualSync();
 };
 
 const handleSelectTask = (task) => {
-    promptManager.loadTask(task);
-    console.log("✅ Tarea seleccionada desde álbum:", task.name);
+    loadTask(task);
 };
 
 const showConfig = computed(
@@ -144,33 +122,25 @@ const showPreview = computed(
         <div class="app-wrapper">
             <ConfigPanel
                 v-show="showConfig"
-                :parsed-colors="promptManager.parsedColors.value"
-                :color-selections="promptManager.colorSelections"
-                :active-slot="activeSlot"
-                :current-task="promptManager.currentTask.value"
-                :all-tasks="promptManager.tasks.value"
+                :current-task="currentTask"
+                :all-tasks="tasks"
                 :is-mobile="isMobile"
-                :url-post="promptManager.urlPost.value"
-                :url-video="promptManager.urlVideo.value"
+                :url-post="urlPost"
+                :url-video="urlVideo"
                 :show-album="showAlbum"
-                @set-active="handleTabClick"
-                @update-color="promptManager.updateColor"
-                @update-task-name="promptManager.updateTaskName"
+                @update-task-name="updateTaskName"
                 @show-tasks="showTasks = true"
                 @show-album="showAlbum = true"
-                @export-tasks="promptManager.exportTasks"
-                @update-video-urls="promptManager.updateVideoUrls"
+                @export-tasks="exportTasks"
+                @update-video-urls="updateVideoUrls"
                 :is-authenticated="isAuthenticated"
             />
 
             <PreviewPanel
                 v-show="showPreview"
-                :prompt-text="promptManager.promptText.value"
-                :final-prompt="promptManager.finalPrompt.value"
-                :parsed-colors="promptManager.parsedColors.value"
-                :color-selections="promptManager.colorSelections"
+                :prompt-text="promptText"
                 :is-mobile="isMobile"
-                @update-prompt="promptManager.promptText.value = $event"
+                @update-prompt="promptText = $event"
             />
 
             <MobileTabBar
@@ -181,14 +151,14 @@ const showPreview = computed(
 
             <TasksPanel
                 v-if="showTasks"
-                :tasks="promptManager.tasks.value"
-                :current-task="promptManager.currentTask.value"
+                :tasks="tasks"
+                :current-task="currentTask"
                 @close="showTasks = false"
-                @load-task="promptManager.loadTask"
-                @create-task="promptManager.createNewTask"
-                @delete-task="promptManager.deleteTask"
-                @delete-all-tasks="promptManager.deleteAllTasks"
-                @duplicate-task="promptManager.duplicateTask"
+                @load-task="loadTask"
+                @create-task="createNewTask"
+                @delete-task="deleteTask"
+                @delete-all-tasks="deleteAllTasks"
+                @duplicate-task="duplicateTask"
             />
 
             <!-- Auth Modal -->
@@ -204,7 +174,7 @@ const showPreview = computed(
             <AlbumModal
                 v-if="showAlbum"
                 :is-open="showAlbum"
-                :tasks="promptManager.tasks.value"
+                :tasks="tasks"
                 @close="showAlbum = false"
                 @select-task="handleSelectTask"
             />
@@ -236,7 +206,6 @@ const showPreview = computed(
 @media (max-width: 1024px) {
     .app-wrapper {
         flex-direction: column;
-        padding-bottom: 60px; /* Espacio para tab bar */
     }
 }
 </style>

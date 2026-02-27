@@ -18,7 +18,6 @@ const emit = defineEmits([
 
 const showSidebar = ref(false);
 
-// Obtener estado de sync
 const {
     lastSyncTime,
     isSyncingNow,
@@ -30,7 +29,6 @@ const {
     manualSync,
 } = useSyncManager();
 
-// Función para formatear el tiempo de sync
 const formatSyncTime = computed(() => {
     if (!lastSyncTime.value) return "Nunca";
 
@@ -54,7 +52,6 @@ const formatSyncTime = computed(() => {
     });
 });
 
-// Manejo de usuario
 const handleUserAction = () => {
     if (props.user) {
         emit("sign-out");

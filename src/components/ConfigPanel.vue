@@ -1,14 +1,9 @@
 <script setup>
 import { computed } from "vue";
-import ColorTabs from "./ColorTabs.vue";
-import ColorPalette from "./ColorPalette.vue";
 import VideoPreview from "./VideoPreview.vue";
 import { usePromptManager } from "../composables/usePromptManager";
 
 const props = defineProps({
-    parsedColors: Array,
-    colorSelections: Object,
-    activeSlot: String,
     currentTask: Object,
     isMobile: Boolean,
     allTasks: Array,
@@ -18,8 +13,6 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-    "set-active",
-    "update-color",
     "update-task-name",
     "show-tasks",
     "export-tasks",
@@ -47,10 +40,21 @@ const handleImport = async () => {
     input.click();
 };
 
+// Map precalculado en O(n) — mismo patrón que TasksPanel para evitar
+// recorrer el array completo cada vez que cambia currentTask.
+const duplicateMap = computed(() => {
+    if (!props.allTasks) return new Map();
+    const map = new Map();
+    for (const t of props.allTasks) {
+        const name = t.name.trim();
+        map.set(name, (map.get(name) || 0) + 1);
+    }
+    return map;
+});
+
 const duplicateCount = computed(() => {
-    if (!props.currentTask || !props.allTasks) return 0;
-    const taskName = props.currentTask.name.trim();
-    return props.allTasks.filter((t) => t.name.trim() === taskName).length;
+    if (!props.currentTask) return 0;
+    return duplicateMap.value.get(props.currentTask.name.trim()) || 0;
 });
 
 const hasDuplicates = computed(() => duplicateCount.value > 1);
@@ -196,44 +200,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                     </button>
                 </div>
             </div>
-
-            <div class="help-text" v-if="parsedColors.length === 0">
-                💡 Usa <code>{color}</code> o <code>{color:nombre}</code> en tu
-                prompt
-            </div>
         </header>
-
-        <div class="tabs-wrapper" v-if="parsedColors.length > 0">
-            <ColorTabs
-                :parsed-colors="parsedColors"
-                :color-selections="colorSelections"
-                :active-slot="activeSlot"
-                @set-active="emit('set-active', $event)"
-            />
-        </div>
-
-        <ColorPalette
-            v-if="activeSlot"
-            :active-slot="activeSlot"
-            :color-selections="colorSelections"
-            @update-color="emit('update-color', activeSlot, $event)"
-        />
-
-        <div v-else-if="parsedColors.length > 0" class="no-selection">
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="48"
-                height="48"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-            >
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 16v-4M12 8h.01" />
-            </svg>
-            <p>Selecciona un color arriba</p>
-        </div>
 
         <VideoPreview
             v-if="!showAlbum"
@@ -252,10 +219,10 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     flex: 0 0 60%;
     display: flex;
     flex-direction: column;
-    padding: 40px;
+    padding: 30px;
     border-right: 1px solid var(--border-color);
     background: var(--bg-primary);
-    overflow-y: auto;
+    /*overflow-y: auto;*/
 }
 
 .config-side.mobile {
@@ -264,7 +231,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 }
 
 .main-header {
-    margin-bottom: 30px;
     flex-shrink: 0;
 }
 
@@ -410,35 +376,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border-radius: 4px;
     font-family: "SF Mono", monospace;
     color: var(--accent);
-}
-
-/* Wrapper para tabs con scroll si son muchos */
-.tabs-wrapper {
-    flex-shrink: 0;
-    margin-bottom: 20px;
-    max-height: 40vh;
-    overflow-y: auto;
-}
-
-.no-selection {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    color: var(--text-secondary);
-    font-size: 14px;
-    padding: 40px;
-    text-align: center;
-}
-
-.no-selection svg {
-    opacity: 0.3;
-}
-
-.no-selection p {
-    font-weight: 500;
 }
 
 @media (max-width: 768px) {

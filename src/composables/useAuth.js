@@ -18,12 +18,11 @@ export function useAuth() {
       } = await supabase.auth.getSession();
       user.value = session?.user || null;
 
-      // Listen for auth changes
       supabase.auth.onAuthStateChange((_event, session) => {
         user.value = session?.user || null;
       });
     } catch (error) {
-      console.error("❌ Error en auth:", error);
+      console.error("Error en auth:", error);
       authError.value = error.message;
     } finally {
       isLoading.value = false;
@@ -63,7 +62,7 @@ export function useAuth() {
 
       user.value = data.user;
 
-      // Emitir evento para que otros componentes restauren datos si es necesario
+      // Notifica a otros composables (ej. useSyncManager) para restaurar datos del usuario
       window.dispatchEvent(new CustomEvent("user-signed-in"));
 
       return { success: true, user: data.user };
@@ -80,7 +79,7 @@ export function useAuth() {
 
       user.value = null;
 
-      // Emitir evento personalizado para que otros componentes limpien sus datos
+      // Notifica a otros composables para limpiar datos de sesión
       window.dispatchEvent(new CustomEvent("user-signed-out"));
 
       return { success: true };

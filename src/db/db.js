@@ -2,26 +2,26 @@ import Dexie from "dexie";
 
 export const db = new Dexie("PromptStudioDB");
 
-// Versión 1 (legacy - para migración)
+// v1: schema original, se mantiene para la migración automática de Dexie
 db.version(1).stores({
   tasks: "id, name, createdAt, updatedAt",
   settings: "key",
 });
 
-// Versión 2 (nueva arquitectura con dos tablas)
+// v2: arquitectura de dos tablas separadas por tipo de sesión
+// - tasks_local: tareas offline, persisten siempre independientemente de la sesión
+// - tasks_auth: tareas del usuario autenticado, se limpian al cerrar sesión
 db.version(2)
   .stores({
-    tasks: null, // Eliminar tabla antigua
-    tasks_local: "id, name, createdAt, updatedAt", // Tareas offline (persisten siempre)
-    tasks_auth: "id, name, createdAt, updatedAt", // Tareas autenticadas (se limpian al logout)
+    tasks: null,
+    tasks_local: "id, name, createdAt, updatedAt",
+    tasks_auth: "id, name, createdAt, updatedAt",
     settings: "key",
   })
   .upgrade(async (tx) => {
-    // Migrar datos de 'tasks' antigua a 'tasks_local'
     const oldTasks = await tx.table("tasks").toArray();
     if (oldTasks.length > 0) {
       await tx.table("tasks_local").bulkAdd(oldTasks);
-      console.log(`✅ Migrados ${oldTasks.length} tareas de v1 → tasks_local`);
     }
   });
 
@@ -29,49 +29,46 @@ export class Task {
   constructor(data = {}) {
     this.id = data.id || Math.floor(Date.now() + Math.random() * 1000);
     this.name = data.name || "Nueva Tarea";
-    this.prompt =
-      data.prompt ||
-      "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.";
-    this.colors = data.colors || {};
+    this.prompt = data.prompt || "Escribe tu prompt aquí.";
     this.url_post = data.url_post || "";
     this.url_video = data.url_video || "";
-    this.createdAt = data.createdAt || new Date().toISOString();
-    this.updatedAt = data.updatedAt || new Date().toISOString();
+    this.createdAt = data.createdAt || Date.now();
+    this.updatedAt = data.updatedAt || Date.now();
   }
 }
 
+// Migra tareas guardadas en localStorage (formato antiguo) a tasks_local en IndexedDB.
+// Solo se ejecuta si tasks_local está vacía, para no duplicar datos.
 export async function migrateFromLocalStorage() {
   const STORAGE_KEY = "prompt-studio-tasks";
 
   try {
-    // Verificar si ya hay datos en tasks_local (nueva arquitectura)
     const existingLocalTasks = await db.tasks_local.count();
-    if (existingLocalTasks > 0) {
-      console.log("✅ tasks_local ya tiene datos");
-      return false;
-    }
+    if (existingLocalTasks > 0) return false;
 
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      console.log("ℹ️ No hay datos en localStorage");
-      return false;
-    }
+    if (!stored) return false;
 
     const tasks = JSON.parse(stored);
+    if (!Array.isArray(tasks) || tasks.length === 0) return false;
 
-    if (!Array.isArray(tasks) || tasks.length === 0) {
-      return false;
-    }
+    // Convertir fechas al nuevo formato numérico durante la migración
+    const normalized = tasks.map((task) => ({
+      ...task,
+      createdAt:
+        typeof task.createdAt === "string"
+          ? new Date(task.createdAt).getTime()
+          : task.createdAt || Date.now(),
+      updatedAt:
+        typeof task.updatedAt === "string"
+          ? new Date(task.updatedAt).getTime()
+          : task.updatedAt || Date.now(),
+    }));
 
-    // Migrar a tasks_local (datos offline)
-    await db.tasks_local.bulkAdd(tasks);
-    console.log(
-      `✅ Migrados ${tasks.length} tareas desde localStorage → tasks_local`,
-    );
-
+    await db.tasks_local.bulkAdd(normalized);
     return true;
   } catch (error) {
-    console.error("❌ Error en migración:", error);
+    console.error("Error en migración desde localStorage:", error);
     return false;
   }
 }
@@ -79,11 +76,10 @@ export async function migrateFromLocalStorage() {
 export async function initDB() {
   try {
     await db.open();
-    console.log("✅ IndexedDB inicializada");
     await migrateFromLocalStorage();
     return true;
   } catch (error) {
-    console.error("❌ Error al abrir IndexedDB:", error);
+    console.error("Error al abrir IndexedDB:", error);
     return false;
   }
 }

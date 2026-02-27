@@ -1,19 +1,10 @@
-import {
-  ref,
-  reactive,
-  computed,
-  watch,
-  onMounted,
-  onUnmounted,
-  shallowRef,
-} from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { db, Task, initDB } from "../db/db";
 import { supabase } from "../supabase/supabaseClient";
 
 const tasks = ref([]);
 const currentTask = ref(null);
 const promptText = ref("");
-const colorSelections = reactive({});
 const urlPost = ref("");
 const urlVideo = ref("");
 
@@ -21,29 +12,19 @@ let initialized = false;
 let saveTimeout = null;
 
 export function usePromptManager() {
-  // Función para limpiar TODOS los datos al cerrar sesión
+  // Limpia únicamente tasks_auth al cerrar sesión.
+  // tasks_local no se toca — esos datos persisten offline.
   const clearLocalData = async () => {
     try {
-      console.log("🧹 Limpiando datos de sesión autenticada...");
-
-      // Limpiar SOLO tasks_auth (las tareas autenticadas)
       await db.tasks_auth.clear();
 
-      // NO tocar tasks_local (las tareas offline persisten)
-
-      // Limpiar estado reactivo
       tasks.value = [];
       currentTask.value = null;
       promptText.value = "";
-      Object.keys(colorSelections).forEach(
-        (key) => delete colorSelections[key],
-      );
       urlPost.value = "";
       urlVideo.value = "";
-
-      console.log("✅ tasks_auth limpiada, estado reiniciado");
     } catch (error) {
-      console.error("❌ Error limpiando datos:", error);
+      console.error("Error limpiando datos de sesión:", error);
     }
   };
 
@@ -52,156 +33,65 @@ export function usePromptManager() {
       initialized = true;
       await initDB();
 
-      // 🔧 OPTIMIZACIÓN: Solo cargar tasks si NO hay sesión activa
-      // Si hay sesión, handleSignIn() se encargará de restaurar desde Supabase
       const {
         data: { session },
       } = await supabase.auth.getSession();
+
       if (!session) {
-        // Usuario offline: cargar tasks_local inmediatamente
+        // Sin sesión activa: cargar tareas offline inmediatamente
         await loadTasks();
-      } else {
-        // Usuario autenticado: esperar a que handleSignIn() restaure y emita 'data-restored'
-        console.log(
-          "⏳ Sesión activa detectada, esperando restauración desde Supabase...",
-        );
       }
+      // Con sesión activa: useSyncManager restaura los datos desde Supabase
+      // y emite 'data-restored', que dispara reloadTasks()
 
-      // Escuchar evento de cierre de sesión
       window.addEventListener("user-signed-out", clearLocalData);
-
-      // Escuchar evento de datos restaurados para recargar tareas
       window.addEventListener("data-restored", reloadTasks);
-
-      // Escuchar evento para crear tarea por defecto
       window.addEventListener("create-default-task", async () => {
-        console.log("📝 Creando tarea por defecto...");
         await createNewTask();
       });
 
-      // Watches separados en lugar de un watch deep
-      // Cada uno observa solo lo que necesita
-
+      // Auto-guardado con debounce de 500ms al editar cualquier campo
       watch(promptText, () => {
         if (currentTask.value) {
           clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => {
-            saveCurrentTask();
-          }, 500);
+          saveTimeout = setTimeout(() => saveCurrentTask(), 500);
         }
       });
 
       watch(urlPost, () => {
         if (currentTask.value) {
           clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => {
-            saveCurrentTask();
-          }, 500);
+          saveTimeout = setTimeout(() => saveCurrentTask(), 500);
         }
       });
 
       watch(urlVideo, () => {
         if (currentTask.value) {
           clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => {
-            saveCurrentTask();
-          }, 500);
+          saveTimeout = setTimeout(() => saveCurrentTask(), 500);
         }
       });
-
-      // Para colorSelections, observar solo cuando cambian los valores
-      // Usamos JSON.stringify para detectar cambios reales
-      watch(
-        () => JSON.stringify(colorSelections),
-        () => {
-          if (currentTask.value) {
-            clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => {
-              saveCurrentTask();
-            }, 500);
-          }
-        },
-      );
     }
   });
 
-  const lastPromptText = ref("");
-  const cachedParsedColors = shallowRef([]);
-
-  const parsedColors = computed(() => {
-    // Si el prompt no cambió, retornar cache
-    if (promptText.value === lastPromptText.value) {
-      return cachedParsedColors.value;
-    }
-
-    const regex = /\{color(?::([^}]+))?\}/g;
-    const matches = [];
-    let match;
-    let index = 1;
-
-    while ((match = regex.exec(promptText.value)) !== null) {
-      const name = match[1] || `Color ${index}`;
-      const key = `color_${index}`;
-      matches.push({
-        key,
-        name,
-        placeholder: match[0],
-        index,
-      });
-
-      if (!colorSelections[key]) {
-        colorSelections[key] = "SlateGray";
-      }
-
-      index++;
-    }
-
-    const validKeys = matches.map((m) => m.key);
-    Object.keys(colorSelections).forEach((key) => {
-      if (!validKeys.includes(key)) {
-        delete colorSelections[key];
-      }
-    });
-
-    // Actualizar cache
-    lastPromptText.value = promptText.value;
-    cachedParsedColors.value = matches;
-
-    return matches;
-  });
-
-  const finalPrompt = computed(() => {
-    let result = promptText.value;
-    parsedColors.value.forEach(({ placeholder, key }) => {
-      result = result.replace(placeholder, colorSelections[key]);
-    });
-    return result;
-  });
-
+  // Determina qué tabla usar según el estado de la sesión:
+  // autenticado → tasks_auth, offline → tasks_local
   const loadTasks = async (skipIfEmpty = false) => {
     try {
-      // 🔒 VERIFICACIÓN DE COHERENCIA: Determinar qué tabla usar
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
       let tableName;
       if (session) {
-        // Usuario autenticado → usar tasks_auth
         tableName = "tasks_auth";
-        console.log("👤 Usuario autenticado, cargando tasks_auth");
       } else {
-        // Usuario offline → usar tasks_local
         tableName = "tasks_local";
-        console.log("📱 Usuario offline, cargando tasks_local");
 
-        // 🐛 FIX: Si no hay sesión pero tasks_auth tiene datos (bug de localStorage borrado)
-        // Limpiar tasks_auth para evitar datos huérfanos
+        // Si hay datos en tasks_auth sin sesión activa, son huérfanos (ej. localStorage borrado)
         const authTasksCount = await db.tasks_auth.count();
         if (authTasksCount > 0) {
-          console.warn(
-            "⚠️ Datos huérfanos en tasks_auth detectados - limpiando",
-          );
+          console.warn("Datos huérfanos en tasks_auth detectados — limpiando");
           await db.tasks_auth.clear();
         }
       }
@@ -215,23 +105,17 @@ export function usePromptManager() {
 
       if (tasks.value.length > 0) {
         await loadTask(tasks.value[0]);
-      } else {
-        // Si skipIfEmpty es true, no crear tarea nueva (esperamos restauración)
-        if (!skipIfEmpty) {
-          await createNewTask();
-        }
-      }
-    } catch (error) {
-      console.error("Error loading tasks:", error);
-      if (!skipIfEmpty) {
+      } else if (!skipIfEmpty) {
         await createNewTask();
       }
+    } catch (error) {
+      console.error("Error cargando tareas:", error);
+      if (!skipIfEmpty) await createNewTask();
     }
   };
 
   const createNewTask = async () => {
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -239,18 +123,16 @@ export function usePromptManager() {
 
       const newTask = new Task({
         name: "Nueva Tarea",
-        prompt:
-          "Escribe tu prompt aquí. Usa {color} o {color:nombre} para colores dinámicos.",
+        prompt: "Escribe tu prompt aquí.",
       });
 
       await db[tableName].add(newTask);
       tasks.value.unshift(newTask);
       await loadTask(newTask);
 
-      console.log(`✅ Tarea creada en ${tableName}`);
       return newTask;
     } catch (error) {
-      console.error("Error creating task:", error);
+      console.error("Error creando tarea:", error);
       throw error;
     }
   };
@@ -260,19 +142,12 @@ export function usePromptManager() {
     promptText.value = task.prompt;
     urlPost.value = task.url_post || "";
     urlVideo.value = task.url_video || "";
-
-    Object.keys(colorSelections).forEach((key) => {
-      delete colorSelections[key];
-    });
-
-    Object.assign(colorSelections, task.colors);
   };
 
   const saveCurrentTask = async () => {
     if (!currentTask.value) return;
 
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -281,23 +156,13 @@ export function usePromptManager() {
       currentTask.value.prompt = promptText.value;
       currentTask.value.url_post = urlPost.value;
       currentTask.value.url_video = urlVideo.value;
+      currentTask.value.updatedAt = Date.now();
 
-      const validColors = {};
-      parsedColors.value.forEach(({ key }) => {
-        if (colorSelections[key]) {
-          validColors[key] = colorSelections[key];
-        }
-      });
-
-      currentTask.value.colors = validColors;
-      currentTask.value.updatedAt = new Date().toISOString();
-
-      // Crear un objeto plano sin reactividad de Vue
+      // Se serializa a un objeto plano para evitar problemas con los proxies de Vue en Dexie
       const taskToSave = {
         id: currentTask.value.id,
         name: currentTask.value.name,
         prompt: currentTask.value.prompt,
-        colors: { ...currentTask.value.colors },
         url_post: currentTask.value.url_post,
         url_video: currentTask.value.url_video,
         createdAt: currentTask.value.createdAt,
@@ -311,10 +176,7 @@ export function usePromptManager() {
         tasks.value[index] = { ...currentTask.value };
       }
     } catch (error) {
-      console.error("Error saving task:", error);
-      console.error("Error name:", error.name);
-      console.error("Error message:", error.message);
-      console.error("Task data:", currentTask.value);
+      console.error("Error guardando tarea:", error);
     }
   };
 
@@ -322,20 +184,18 @@ export function usePromptManager() {
     if (!currentTask.value) return;
 
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const tableName = session ? "tasks_auth" : "tasks_local";
 
       currentTask.value.name = name;
-      currentTask.value.updatedAt = new Date().toISOString();
+      currentTask.value.updatedAt = Date.now();
 
       const taskToSave = {
         id: currentTask.value.id,
         name: currentTask.value.name,
         prompt: currentTask.value.prompt,
-        colors: { ...currentTask.value.colors },
         url_post: currentTask.value.url_post || "",
         url_video: currentTask.value.url_video || "",
         createdAt: currentTask.value.createdAt,
@@ -349,13 +209,12 @@ export function usePromptManager() {
         tasks.value[index] = { ...currentTask.value };
       }
     } catch (error) {
-      console.error("Error updating task name:", error);
+      console.error("Error actualizando nombre de tarea:", error);
     }
   };
 
   const deleteTask = async (taskId) => {
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -364,9 +223,7 @@ export function usePromptManager() {
       await db[tableName].delete(taskId);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
-      if (index !== -1) {
-        tasks.value.splice(index, 1);
-      }
+      if (index !== -1) tasks.value.splice(index, 1);
 
       if (currentTask.value?.id === taskId) {
         if (tasks.value.length > 0) {
@@ -376,13 +233,12 @@ export function usePromptManager() {
         }
       }
     } catch (error) {
-      console.error("Error deleting task:", error);
+      console.error("Error eliminando tarea:", error);
     }
   };
 
   const deleteAllTasks = async () => {
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -391,16 +247,14 @@ export function usePromptManager() {
       await db[tableName].clear();
       tasks.value = [];
       await createNewTask();
-      console.log(`✅ Todas las tareas eliminadas de ${tableName}`);
     } catch (error) {
-      console.error("❌ Error eliminando todas las tareas:", error);
+      console.error("Error eliminando todas las tareas:", error);
       throw error;
     }
   };
 
   const duplicateTask = async (task) => {
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -409,7 +263,6 @@ export function usePromptManager() {
       const duplicate = new Task({
         name: `${task.name} (copia)`,
         prompt: task.prompt,
-        colors: { ...task.colors },
         url_post: task.url_post || "",
         url_video: task.url_video || "",
       });
@@ -419,14 +272,13 @@ export function usePromptManager() {
 
       return duplicate;
     } catch (error) {
-      console.error("Error duplicating task:", error);
+      console.error("Error duplicando tarea:", error);
       throw error;
     }
   };
 
   const exportTasks = async () => {
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -436,8 +288,8 @@ export function usePromptManager() {
 
       const data = {
         version: "2.0.0",
-        exportedAt: new Date().toISOString(),
-        source: tableName, // Indicar de dónde viene (tasks_auth o tasks_local)
+        exportedAt: Date.now(),
+        source: tableName,
         tasks: allTasks,
       };
 
@@ -451,10 +303,8 @@ export function usePromptManager() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-
-      console.log(`✅ Exportadas ${allTasks.length} tareas desde ${tableName}`);
     } catch (error) {
-      console.error("Error exporting tasks:", error);
+      console.error("Error exportando tareas:", error);
     }
   };
 
@@ -471,37 +321,29 @@ export function usePromptManager() {
             return;
           }
 
-          // Determinar tabla según sesión
           const {
             data: { session },
           } = await supabase.auth.getSession();
           const tableName = session ? "tasks_auth" : "tasks_local";
 
-          // Generar IDs únicos secuencialmente
+          // Se generan IDs nuevos para evitar colisiones con tareas existentes
           const baseId = Date.now();
-          const newTasks = data.tasks.map((task, index) => {
-            return {
-              id: baseId + index, // IDs secuenciales garantizados únicos
-              name: task.name || "Tarea importada",
-              prompt: task.prompt || "",
-              colors: task.colors || {},
-              url_post: task.url_post || "", // Retrocompatibilidad
-              url_video: task.url_video || "", // Retrocompatibilidad
-              createdAt: task.createdAt || new Date().toISOString(),
-              updatedAt: task.updatedAt || new Date().toISOString(),
-            };
-          });
+          const newTasks = data.tasks.map((task, index) => ({
+            id: baseId + index,
+            name: task.name || "Tarea importada",
+            prompt: task.prompt || "",
+            url_post: task.url_post || "",
+            url_video: task.url_video || "",
+            createdAt: task.createdAt || Date.now(),
+            updatedAt: task.updatedAt || Date.now(),
+          }));
 
-          // Usar bulkAdd con nuevos IDs
           await db[tableName].bulkAdd(newTasks);
-
-          // Agregar a lista local
           tasks.value.push(...newTasks);
 
-          console.log(`✅ ${newTasks.length} tareas importadas a ${tableName}`);
           resolve(newTasks.length);
         } catch (error) {
-          console.error("Error importing tasks:", error);
+          console.error("Error importando tareas:", error);
           reject(new Error(`Error al importar: ${error.message}`));
         }
       };
@@ -511,67 +353,53 @@ export function usePromptManager() {
     });
   };
 
-  const updateColor = (key, color) => {
-    colorSelections[key] = color;
-  };
-
   const updateVideoUrls = ({ url_post, url_video }) => {
     urlPost.value = url_post;
     urlVideo.value = url_video;
   };
 
-  // Actualizar URL de video de cualquier tarea (usado por AlbumModal para HD upgrade)
+  // Actualiza la URL de video de una tarea específica sin afectar otros campos.
+  // Usado por AlbumModal cuando se hace upgrade a versión HD.
   const updateTaskVideoUrl = async (taskId, url_video) => {
     try {
-      // Determinar tabla según sesión
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const tableName = session ? "tasks_auth" : "tasks_local";
 
-      // Encontrar tarea
       const task = tasks.value.find((t) => t.id === taskId);
       if (!task) {
-        console.warn(`⚠️ Task not found: ${taskId}`);
+        console.warn(`Tarea no encontrada: ${taskId}`);
         return;
       }
 
-      // Actualizar tarea
       task.url_video = url_video;
-      task.updatedAt = new Date().toISOString();
+      task.updatedAt = Date.now();
 
-      // Crear objeto plano para guardar
       const taskToSave = {
         id: task.id,
         name: task.name,
         prompt: task.prompt,
-        colors: { ...task.colors },
         url_post: task.url_post,
         url_video: url_video,
         createdAt: task.createdAt,
         updatedAt: task.updatedAt,
       };
 
-      // Guardar en DB
       await db[tableName].put(taskToSave);
 
-      // Si es la tarea actual, actualizar también el estado
       if (currentTask.value?.id === taskId) {
         urlVideo.value = url_video;
       }
-
-      console.log(`💾 Updated video URL for task: ${task.name}`);
     } catch (error) {
-      console.error("❌ Error updating task video URL:", error);
+      console.error("Error actualizando URL de video:", error);
     }
   };
 
-  // Función para recargar tareas después de restauración
   const reloadTasks = async () => {
     await loadTasks();
   };
 
-  // Cleanup del event listener
   onUnmounted(() => {
     window.removeEventListener("user-signed-out", clearLocalData);
     window.removeEventListener("data-restored", reloadTasks);
@@ -582,11 +410,8 @@ export function usePromptManager() {
     tasks,
     currentTask,
     promptText,
-    colorSelections,
     urlPost,
     urlVideo,
-    parsedColors,
-    finalPrompt,
     createNewTask,
     loadTask,
     saveCurrentTask,
@@ -596,7 +421,6 @@ export function usePromptManager() {
     duplicateTask,
     exportTasks,
     importTasks,
-    updateColor,
     updateVideoUrls,
     updateTaskVideoUrl,
     clearLocalData,

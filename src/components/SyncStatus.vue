@@ -46,7 +46,7 @@ const syncStatus = computed(() => {
     if (isSyncingNow.value) return "syncing";
     if (syncError.value) return "error";
     if (syncSuccess.value) return "success";
-    if (isThrottled.value) return "throttled"; // Nuevo estado
+    if (isThrottled.value) return "throttled";
     return "synced";
 });
 
@@ -71,7 +71,6 @@ const syncStatusText = computed(() => {
 
 const handleManualSync = async () => {
     await manualSync();
-    // No cerramos showSyncDetails para que vean el resultado
 };
 </script>
 

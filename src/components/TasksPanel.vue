@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, shallowRef } from "vue";
+import { ref, computed, watch, onMounted } from "vue";
 
 const props = defineProps({
     tasks: Array,
@@ -15,12 +15,13 @@ const emit = defineEmits([
     "duplicate-task",
 ]);
 
-// Configuración de paginación (persistente en localStorage)
+// Persiste la preferencia de paginación en localStorage entre sesiones
 const PAGINATION_KEY = "prompt-studio-pagination";
 const itemsPerPage = ref(10);
 const currentPage = ref(1);
 
-const searchQuery = ref("");
+const searchQueryRaw = ref(""); // Valor visual inmediato (v-model en el input)
+const searchQuery = ref(""); // Valor debounceado (usado en los computeds)
 const sortBy = ref("created-desc");
 const viewMode = ref("grid");
 const showDeleteModal = ref(false);
@@ -29,7 +30,6 @@ const deleteConfirmText = ref("");
 const showDeleteAllModal = ref(false);
 const deleteAllConfirmText = ref("");
 
-// Cargar preferencia de paginación desde localStorage
 const loadPaginationPreference = () => {
     const stored = localStorage.getItem(PAGINATION_KEY);
     if (stored) {
@@ -37,18 +37,19 @@ const loadPaginationPreference = () => {
     }
 };
 
-// Guardar preferencia de paginación
 const savePaginationPreference = (value) => {
     itemsPerPage.value = value;
     localStorage.setItem(PAGINATION_KEY, value.toString());
-    currentPage.value = 1; // Resetear a primera página al cambiar cantidad
+    currentPage.value = 1;
 };
 
-// Cargar al montar
 onMounted(() => {
     loadPaginationPreference();
 });
 
+// Formatea un timestamp a string legible.
+// Se llama solo desde paginatedTasks (computed), no desde el template,
+// para evitar ejecutar toLocaleDateString() en cada render de cada card.
 const formatDate = (timestamp) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -70,99 +71,95 @@ const formatDate = (timestamp) => {
     });
 };
 
-const getColorCount = (task) => {
-    return Object.keys(task.colors || {}).length;
-};
+// Map precalculado para detectar nombres duplicados en O(n).
+// Evita recorrer el array completo por cada card durante el render.
+const duplicateMap = computed(() => {
+    const map = new Map();
+    for (const t of props.tasks) {
+        const name = t.name.trim();
+        map.set(name, (map.get(name) || 0) + 1);
+    }
+    return map;
+});
 
 const getDuplicateCount = (taskName) => {
-    return props.tasks.filter((t) => t.name.trim() === taskName.trim()).length;
+    return duplicateMap.value.get(taskName.trim()) || 0;
 };
 
 const hasUrl = (task) => {
     return !!(task.url_post || task.url_video);
 };
 
-// Cache para optimización con muchas tareas (466+)
-const lastFilterParams = ref({ query: "", sortBy: "", tasksLength: 0 });
-const cachedFilteredTasks = shallowRef([]);
+// Filtro separado del sort para que Vue los cachee independientemente.
+// Cuando solo cambia currentPage, ninguno de estos dos se re-ejecuta.
+const filteredTasks = computed(() => {
+    if (!searchQuery.value) return props.tasks;
+    const query = searchQuery.value.toLowerCase();
+    return props.tasks.filter(
+        (task) =>
+            task.name.toLowerCase().includes(query) ||
+            task.prompt.toLowerCase().includes(query),
+    );
+});
 
 const filteredAndSortedTasks = computed(() => {
-    // Detectar si necesitamos recalcular
-    const currentParams = {
-        query: searchQuery.value,
-        sortBy: sortBy.value,
-        tasksLength: props.tasks.length,
-    };
+    const result = [...filteredTasks.value];
 
-    const needsRecalculation =
-        currentParams.query !== lastFilterParams.value.query ||
-        currentParams.sortBy !== lastFilterParams.value.sortBy ||
-        currentParams.tasksLength !== lastFilterParams.value.tasksLength;
-
-    // Si no hay cambios, retornar cache
-    if (!needsRecalculation && cachedFilteredTasks.value.length > 0) {
-        return cachedFilteredTasks.value;
-    }
-
-    let result = [...props.tasks];
-
-    // Filtrar por búsqueda
-    if (searchQuery.value) {
-        const query = searchQuery.value.toLowerCase();
-        result = result.filter(
-            (task) =>
-                task.name.toLowerCase().includes(query) ||
-                task.prompt.toLowerCase().includes(query),
-        );
-    }
-
-    // Ordenar
     result.sort((a, b) => {
         switch (sortBy.value) {
             case "updated-desc":
-                return new Date(b.updatedAt) - new Date(a.updatedAt);
+                return b.updatedAt - a.updatedAt;
             case "created-desc":
-                return new Date(b.createdAt) - new Date(a.createdAt);
+                return b.createdAt - a.createdAt;
             case "created-asc":
-                return new Date(a.createdAt) - new Date(b.createdAt);
+                return a.createdAt - b.createdAt;
             case "name":
                 return a.name.localeCompare(b.name);
-            case "colors":
-                return getColorCount(b) - getColorCount(a);
             default:
                 return 0;
         }
     });
 
-    // Actualizar cache
-    cachedFilteredTasks.value = result;
-    lastFilterParams.value = currentParams;
-
-    console.log(
-        `📊 Filtradas ${result.length} de ${props.tasks.length} tareas`,
-    );
-
     return result;
 });
 
-// Calcular total de páginas
 const totalPages = computed(() => {
     return Math.ceil(filteredAndSortedTasks.value.length / itemsPerPage.value);
 });
 
-// Tareas paginadas
+// Enriquece TODOS los tasks filtrados+ordenados de una vez.
+// Se invalida solo cuando cambia el contenido (filter, sort, tasks prop),
+// NO cuando cambia currentPage — eso es lo critico.
+// Asi el cambio de pagina solo hace un slice sobre objetos ya enriquecidos.
+const enrichedTasks = computed(() => {
+    const dm = duplicateMap.value;
+    return filteredAndSortedTasks.value.map((task) => ({
+        ...task,
+        _dateLabel: formatDate(task.updatedAt),
+        _duplicateCount: dm.get(task.name.trim()) || 0,
+        _hasUrl: !!(task.url_post || task.url_video),
+    }));
+});
+
+// Solo hace un slice — sin new Date(), sin toLocaleDateString(), sin Map.get().
+// Cambiar de pagina ahora es practicamente gratis.
 const paginatedTasks = computed(() => {
     const start = (currentPage.value - 1) * itemsPerPage.value;
     const end = start + itemsPerPage.value;
-    return filteredAndSortedTasks.value.slice(start, end);
+    return enrichedTasks.value.slice(start, end);
 });
 
-// Resetear a primera página cuando cambie la búsqueda
-watch(searchQuery, () => {
-    currentPage.value = 1;
+// Debounce de 200ms: la UI responde al instante (searchQueryRaw),
+// pero el filter/sort costoso solo se ejecuta cuando el usuario pausa.
+let searchDebounce = null;
+watch(searchQueryRaw, (val) => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+        searchQuery.value = val;
+        currentPage.value = 1;
+    }, 200);
 });
 
-// Validar página actual cuando cambien las tareas filtradas
 watch(totalPages, (newTotal) => {
     if (currentPage.value > newTotal && newTotal > 0) {
         currentPage.value = newTotal;
@@ -172,6 +169,7 @@ watch(totalPages, (newTotal) => {
 });
 
 const clearSearch = () => {
+    searchQueryRaw.value = "";
     searchQuery.value = "";
 };
 
@@ -212,7 +210,7 @@ const confirmDeleteAll = () => {
     if (deleteAllConfirmText.value.toLowerCase() === "reset") {
         emit("delete-all-tasks");
         closeDeleteAllModal();
-        emit("close"); // Cerrar el panel después de eliminar
+        emit("close");
     }
 };
 
@@ -220,7 +218,6 @@ const isDeleteAllEnabled = computed(() => {
     return deleteAllConfirmText.value.toLowerCase() === "reset";
 });
 
-// Navegación de páginas
 const goToPage = (page) => {
     if (page >= 1 && page <= totalPages.value) {
         currentPage.value = page;
@@ -239,35 +236,31 @@ const prevPage = () => {
     }
 };
 
-// Generar array de números de página para mostrar
+// Genera el array de páginas con ellipsis para el paginador, mostrando siempre
+// la primera, la última y las páginas adyacentes a la actual.
 const pageNumbers = computed(() => {
     const pages = [];
     const total = totalPages.value;
     const current = currentPage.value;
 
     if (total <= 7) {
-        // Mostrar todas las páginas
         for (let i = 1; i <= total; i++) {
             pages.push(i);
         }
     } else {
-        // Mostrar páginas con elipsis
         if (current <= 4) {
-            // Cerca del inicio
             for (let i = 1; i <= 5; i++) {
                 pages.push(i);
             }
             pages.push("...");
             pages.push(total);
         } else if (current >= total - 3) {
-            // Cerca del final
             pages.push(1);
             pages.push("...");
             for (let i = total - 4; i <= total; i++) {
                 pages.push(i);
             }
         } else {
-            // En el medio
             pages.push(1);
             pages.push("...");
             for (let i = current - 1; i <= current + 1; i++) {
@@ -283,6 +276,183 @@ const pageNumbers = computed(() => {
 </script>
 
 <template>
+    <!-- SVG sprite: todos los iconos definidos una vez, referenciados con <use> -->
+    <svg aria-hidden="true" style="display: none">
+        <defs>
+            <symbol
+                id="icon-x"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+            </symbol>
+            <symbol
+                id="icon-search"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+            </symbol>
+            <symbol
+                id="icon-grid"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+            </symbol>
+            <symbol
+                id="icon-list"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+            </symbol>
+            <symbol
+                id="icon-trash"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <polyline points="3 6 5 6 21 6" />
+                <path
+                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                />
+            </symbol>
+            <symbol
+                id="icon-trash-lines"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <polyline points="3 6 5 6 21 6" />
+                <path
+                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                />
+                <line x1="10" y1="11" x2="10" y2="17" />
+                <line x1="14" y1="11" x2="14" y2="17" />
+            </symbol>
+            <symbol
+                id="icon-plus"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+            </symbol>
+            <symbol
+                id="icon-load"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <polyline points="9 11 12 14 22 4" />
+                <path
+                    d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                />
+            </symbol>
+            <symbol
+                id="icon-duplicate"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path
+                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                />
+            </symbol>
+            <symbol
+                id="icon-clock"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+            </symbol>
+            <symbol
+                id="icon-link"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <path
+                    d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
+                />
+                <path
+                    d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+                />
+            </symbol>
+            <symbol
+                id="icon-search-empty"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+            >
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.35-4.35" />
+            </symbol>
+            <symbol
+                id="icon-chevron-left"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <polyline points="15 18 9 12 15 6" />
+            </symbol>
+            <symbol
+                id="icon-chevron-right"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <polyline points="9 18 15 12 9 6" />
+            </symbol>
+            <symbol
+                id="icon-warning"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+            >
+                <path
+                    d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+            </symbol>
+        </defs>
+    </svg>
+
     <div class="modal-overlay" @click="emit('close')">
         <div class="modal-container" @click.stop>
             <!-- Header -->
@@ -292,59 +462,28 @@ const pageNumbers = computed(() => {
                     <span class="task-count">{{ tasks.length }} tareas</span>
                 </div>
                 <button @click="emit('close')" class="close-btn" title="Cerrar">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="24"
-                        height="24"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <line x1="18" y1="6" x2="6" y2="18" />
-                        <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
+                    <svg width="24" height="24"><use href="#icon-x" /></svg>
                 </button>
             </div>
 
             <!-- Toolbar -->
             <div class="modal-toolbar">
                 <div class="search-container">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <circle cx="11" cy="11" r="8" />
-                        <path d="m21 21-4.35-4.35" />
+                    <svg width="18" height="18">
+                        <use href="#icon-search" />
                     </svg>
                     <input
-                        v-model="searchQuery"
+                        v-model="searchQueryRaw"
                         type="text"
                         placeholder="Buscar por nombre o contenido..."
                         class="search-input"
                     />
                     <button
-                        v-if="searchQuery"
+                        v-if="searchQueryRaw"
                         @click="clearSearch"
                         class="clear-search"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <line x1="18" y1="6" x2="6" y2="18" />
-                            <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
+                        <svg width="16" height="16"><use href="#icon-x" /></svg>
                     </button>
                 </div>
 
@@ -356,19 +495,8 @@ const pageNumbers = computed(() => {
                             class="view-btn"
                             title="Vista cuadrícula"
                         >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            >
-                                <rect x="3" y="3" width="7" height="7" />
-                                <rect x="14" y="3" width="7" height="7" />
-                                <rect x="14" y="14" width="7" height="7" />
-                                <rect x="3" y="14" width="7" height="7" />
+                            <svg width="18" height="18">
+                                <use href="#icon-grid" />
                             </svg>
                         </button>
                         <button
@@ -377,21 +505,8 @@ const pageNumbers = computed(() => {
                             class="view-btn"
                             title="Vista lista"
                         >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                            >
-                                <line x1="8" y1="6" x2="21" y2="6" />
-                                <line x1="8" y1="12" x2="21" y2="12" />
-                                <line x1="8" y1="18" x2="21" y2="18" />
-                                <line x1="3" y1="6" x2="3.01" y2="6" />
-                                <line x1="3" y1="12" x2="3.01" y2="12" />
-                                <line x1="3" y1="18" x2="3.01" y2="18" />
+                            <svg width="18" height="18">
+                                <use href="#icon-list" />
                             </svg>
                         </button>
                     </div>
@@ -433,37 +548,15 @@ const pageNumbers = computed(() => {
                         title="Borrar todas las tareas"
                         :disabled="tasks.length === 0"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <polyline points="3 6 5 6 21 6" />
-                            <path
-                                d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                            />
-                            <line x1="10" y1="11" x2="10" y2="17" />
-                            <line x1="14" y1="11" x2="14" y2="17" />
+                        <svg width="18" height="18">
+                            <use href="#icon-trash-lines" />
                         </svg>
                         Borrar todo
                     </button>
 
                     <button @click="emit('create-task')" class="new-task-btn">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <line x1="12" y1="5" x2="12" y2="19" />
-                            <line x1="5" y1="12" x2="19" y2="12" />
+                        <svg width="18" height="18">
+                            <use href="#icon-plus" />
                         </svg>
                         Nueva
                     </button>
@@ -476,14 +569,8 @@ const pageNumbers = computed(() => {
                 :class="{ 'list-view': viewMode === 'list' }"
             >
                 <div
-                    v-for="task in paginatedTasks"
-                    :key="task.id"
-                    v-memo="[
-                        task.id,
-                        task.name,
-                        task.updatedAt,
-                        currentTask?.id === task.id,
-                    ]"
+                    v-for="(task, index) in paginatedTasks"
+                    :key="index"
                     class="task-card"
                     :class="{ active: currentTask?.id === task.id }"
                 >
@@ -494,18 +581,13 @@ const pageNumbers = computed(() => {
                                 <h3>
                                     {{ task.name }}
                                     <span
-                                        v-if="getDuplicateCount(task.name) > 1"
+                                        v-if="task._duplicateCount > 1"
                                         class="duplicate-badge"
-                                        :title="`Existen ${getDuplicateCount(task.name)} tareas con este nombre`"
+                                        :title="`Existen ${task._duplicateCount} tareas con este nombre`"
                                     >
-                                        ×{{ getDuplicateCount(task.name) }}
+                                        ×{{ task._duplicateCount }}
                                     </span>
                                 </h3>
-                                <span
-                                    class="badge"
-                                    v-if="currentTask?.id === task.id"
-                                    >✓</span
-                                >
                             </div>
                         </div>
                         <div class="card-actions">
@@ -515,19 +597,8 @@ const pageNumbers = computed(() => {
                                 :disabled="currentTask?.id === task.id"
                                 title="Cargar tarea"
                             >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="18"
-                                    height="18"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <polyline points="9 11 12 14 22 4" />
-                                    <path
-                                        d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
-                                    />
+                                <svg width="18" height="18">
+                                    <use href="#icon-load" />
                                 </svg>
                             </button>
                             <button
@@ -535,26 +606,8 @@ const pageNumbers = computed(() => {
                                 class="icon-btn"
                                 title="Duplicar tarea"
                             >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="18"
-                                    height="18"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <rect
-                                        x="9"
-                                        y="9"
-                                        width="13"
-                                        height="13"
-                                        rx="2"
-                                        ry="2"
-                                    />
-                                    <path
-                                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                                    />
+                                <svg width="18" height="18">
+                                    <use href="#icon-duplicate" />
                                 </svg>
                             </button>
                             <button
@@ -562,19 +615,8 @@ const pageNumbers = computed(() => {
                                 class="icon-btn delete-btn"
                                 title="Eliminar tarea"
                             >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="18"
-                                    height="18"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <polyline points="3 6 5 6 21 6" />
-                                    <path
-                                        d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                                    />
+                                <svg width="18" height="18">
+                                    <use href="#icon-trash" />
                                 </svg>
                             </button>
                         </div>
@@ -582,61 +624,17 @@ const pageNumbers = computed(() => {
 
                     <!-- Card Body -->
                     <div class="card-body">
-                        <!-- Metadata -->
                         <div class="meta-info">
                             <div class="meta-item">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <circle cx="12" cy="12" r="10" />
-                                    <polyline points="12 6 12 12 16 14" />
+                                <svg width="14" height="14">
+                                    <use href="#icon-clock" />
                                 </svg>
-                                {{ formatDate(task.updatedAt) }}
+                                {{ task._dateLabel }}
                             </div>
 
-                            <div
-                                class="meta-item"
-                                v-if="getColorCount(task) > 0"
-                            >
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <circle cx="12" cy="12" r="10" />
-                                </svg>
-                                <span class="colors-count">{{
-                                    getColorCount(task)
-                                }}</span>
-                                colores
-                            </div>
-
-                            <div class="meta-item" v-if="hasUrl(task)">
-                                <svg
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    width="14"
-                                    height="14"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                >
-                                    <path
-                                        d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"
-                                    />
-                                    <path
-                                        d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
-                                    />
+                            <div class="meta-item" v-if="task._hasUrl">
+                                <svg width="14" height="14">
+                                    <use href="#icon-link" />
                                 </svg>
                                 <span class="has-url">Con enlace</span>
                             </div>
@@ -646,25 +644,16 @@ const pageNumbers = computed(() => {
 
                 <!-- Empty State -->
                 <div v-if="paginatedTasks.length === 0" class="empty-state">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="80"
-                        height="80"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                    >
-                        <circle cx="11" cy="11" r="8" />
-                        <path d="m21 21-4.35-4.35" />
+                    <svg width="80" height="80">
+                        <use href="#icon-search-empty" />
                     </svg>
                     <h3>No se encontraron tareas</h3>
-                    <p v-if="searchQuery">
+                    <p v-if="searchQueryRaw">
                         Intenta con otros términos de búsqueda
                     </p>
                     <p v-else>Crea tu primera tarea para comenzar</p>
                     <button
-                        v-if="searchQuery"
+                        v-if="searchQueryRaw"
                         @click="clearSearch"
                         class="clear-filters-btn"
                     >
@@ -682,16 +671,8 @@ const pageNumbers = computed(() => {
                         class="page-btn"
                         title="Página anterior"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <polyline points="15 18 9 12 15 6" />
+                        <svg width="16" height="16">
+                            <use href="#icon-chevron-left" />
                         </svg>
                     </button>
 
@@ -719,16 +700,8 @@ const pageNumbers = computed(() => {
                         class="page-btn"
                         title="Página siguiente"
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="16"
-                            height="16"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <polyline points="9 18 15 12 9 6" />
+                        <svg width="16" height="16">
+                            <use href="#icon-chevron-right" />
                         </svg>
                     </button>
                 </div>
@@ -747,20 +720,8 @@ const pageNumbers = computed(() => {
         <div v-if="showDeleteModal" class="delete-modal-overlay">
             <div class="delete-modal">
                 <div class="delete-modal-icon">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="32"
-                        height="32"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <path
-                            d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                        />
-                        <line x1="12" y1="9" x2="12" y2="13" />
-                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                    <svg width="32" height="32">
+                        <use href="#icon-warning" />
                     </svg>
                 </div>
 
@@ -806,21 +767,8 @@ const pageNumbers = computed(() => {
         <div v-if="showDeleteAllModal" class="delete-modal-overlay">
             <div class="delete-modal">
                 <div class="delete-modal-icon delete-all-icon">
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="32"
-                        height="32"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                    >
-                        <polyline points="3 6 5 6 21 6" />
-                        <path
-                            d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
-                        />
-                        <line x1="10" y1="11" x2="10" y2="17" />
-                        <line x1="14" y1="11" x2="14" y2="17" />
+                    <svg width="32" height="32">
+                        <use href="#icon-trash-lines" />
                     </svg>
                 </div>
 
@@ -866,12 +814,13 @@ const pageNumbers = computed(() => {
 </template>
 
 <style scoped>
-/* Copiar todos los estilos del documento original */
 .modal-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(10px);
+    /* backdrop-filter: blur(10px) eliminado — fuerza re-composición GPU
+       en cada paint dentro del modal, incluyendo cada cambio de página.
+       El fondo semitransparente da suficiente separación visual. */
     z-index: 1000;
     display: flex;
     align-items: center;
@@ -1191,7 +1140,13 @@ const pageNumbers = computed(() => {
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 20px;
-    transition: all 0.2s;
+    /* Solo transicionar transform y border-color — las propiedades más baratas.
+       box-shadow removido del hover: fuerza repaint en cada frame.
+       will-change removido del estado estático: promovía TODAS las cards a capas
+       GPU simultáneamente, causando re-composición masiva al cambiar de página. */
+    transition:
+        border-color 0.2s,
+        transform 0.2s;
     cursor: pointer;
     display: flex;
     flex-direction: column;
@@ -1200,8 +1155,10 @@ const pageNumbers = computed(() => {
 
 .task-card:hover {
     border-color: var(--accent);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
     transform: translateY(-2px);
+    /* will-change solo durante el hover — promueve a capa GPU solo cuando
+       realmente se va a animar, no en los 50 elementos estáticos a la vez */
+    will-change: transform;
 }
 
 .task-card.active {
@@ -1256,21 +1213,6 @@ const pageNumbers = computed(() => {
     flex-shrink: 0;
 }
 
-.badge {
-    background: var(--accent);
-    color: white;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    font-size: 12px;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    box-shadow: 0 2px 4px rgba(0, 113, 227, 0.2);
-}
-
 .card-actions {
     display: flex;
     gap: 6px;
@@ -1288,7 +1230,10 @@ const pageNumbers = computed(() => {
     align-items: center;
     justify-content: center;
     color: var(--text-secondary);
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s,
+        color 0.2s;
 }
 
 .icon-btn:hover:not(:disabled) {
@@ -1423,7 +1368,10 @@ const pageNumbers = computed(() => {
     align-items: center;
     justify-content: center;
     color: var(--text-primary);
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s,
+        color 0.2s;
     flex-shrink: 0;
 }
 
@@ -1461,7 +1409,10 @@ const pageNumbers = computed(() => {
     color: var(--text-primary);
     font-weight: 600;
     font-size: 14px;
-    transition: all 0.2s;
+    transition:
+        background 0.2s,
+        border-color 0.2s,
+        color 0.2s;
     flex-shrink: 0;
 }
 
@@ -1502,7 +1453,7 @@ const pageNumbers = computed(() => {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(8px);
+    /* backdrop-filter: blur(8px) eliminado — misma razón que modal-overlay */
     z-index: 1100;
     display: flex;
     align-items: center;
@@ -1895,12 +1846,6 @@ const pageNumbers = computed(() => {
     .duplicate-badge {
         font-size: 10px;
         padding: 2px 5px;
-    }
-
-    .badge {
-        width: 20px;
-        height: 20px;
-        font-size: 11px;
     }
 
     .card-actions {

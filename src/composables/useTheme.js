@@ -1,4 +1,4 @@
-import { ref, watch, onMounted } from "vue";
+import { ref, onMounted } from "vue";
 
 export function useTheme() {
   const THEME_KEY = "prompt-studio-theme";
@@ -29,7 +29,7 @@ export function useTheme() {
     applyTheme();
   };
 
-  // Watch para cambios en la preferencia del sistema
+  // Para cambios en la preferencia del sistema
   onMounted(() => {
     initTheme();
 

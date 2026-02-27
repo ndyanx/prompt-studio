@@ -19,51 +19,43 @@ const previousIndex = ref(-1);
 const preloadedNextIndex = ref(null);
 const preloadElement = ref(null);
 
-// Cooldown para botón "Otro video" (evitar spam)
 const isRandomizing = ref(false);
 const cooldownSeconds = ref(0);
 let cooldownInterval = null;
 
-// Cache para optimizar filtrado con 466 tareas
+// Cache para evitar refiltrar el array completo en cada render
 const tasksWithVideoCache = ref([]);
 const lastTasksLength = ref(0);
 
-// Cache para verificaciones HD
+// Cache para no repetir llamadas a la API por la misma URL
 const hdCheckCache = new Map();
 
-// Verificar y actualizar a versión HD si existe usando la API de Grok
+// Consulta la API para obtener la versión HD del video si existe.
+// Actualiza la tarea en DB y el cache para evitar consultas repetidas.
 const checkAndUpgradeToHD = async (url, task) => {
-    // Si ya es HD, no hacer nada
     if (!url || url.includes("_hd.mp4")) {
         return url;
     }
 
-    // Verificar si ya se checó esta URL
     if (hdCheckCache.has(url)) {
         return hdCheckCache.get(url);
     }
 
-    // Si la tarea no tiene url_post, no podemos verificar HD con la API
     if (!task.url_post || !task.url_post.trim()) {
-        console.log(`⚠️ No url_post available for task: ${task.name}`);
         hdCheckCache.set(url, url);
         return url;
     }
 
     try {
-        // Extraer el ID del post de la URL
         const postIdMatch = task.url_post.match(/\/post\/([a-f0-9-]+)/i);
 
         if (!postIdMatch || !postIdMatch[1]) {
-            console.log(`⚠️ Invalid post URL format: ${task.url_post}`);
             hdCheckCache.set(url, url);
             return url;
         }
 
         const postId = postIdMatch[1];
-        console.log(`🔍 Checking HD version for: ${task.name}`);
 
-        // Crear el payload para la API de Grok
         const payload = {
             url: "https://grok.com/rest/media/post/get",
             method: "POST",
@@ -94,41 +86,29 @@ const checkAndUpgradeToHD = async (url, task) => {
 
         const post = data.post;
 
-        // Verificar que sea un video
         if (post.mediaType !== "MEDIA_POST_TYPE_VIDEO") {
-            console.log(`⚠️ Post is not a video: ${task.name}`);
             hdCheckCache.set(url, url);
             return url;
         }
 
-        // Verificar si existe hdMediaUrl
         if (post.hdMediaUrl) {
-            console.log(`✨ HD version found in album: ${task.name}`);
-
-            // Guardar en cache
             hdCheckCache.set(url, post.hdMediaUrl);
-
-            // Actualizar en DB usando usePromptManager
             await updateTaskVideoUrl(task.id, post.hdMediaUrl);
-
             return post.hdMediaUrl;
         } else {
-            // No hay versión HD, usar la URL actual
-            console.log(`📹 Using SD version in album: ${task.name}`);
             const videoUrl = post.mediaUrl || url;
             hdCheckCache.set(url, videoUrl);
             return videoUrl;
         }
     } catch (error) {
-        console.log(`📹 Error checking HD, using current URL:`, error.message);
         hdCheckCache.set(url, url);
         return url;
     }
 };
 
-// Filtrar solo tareas que tienen video (optimizado con cache)
+// Filtra las tareas que tienen video. Usa cache por longitud para evitar
+// refiltrar cuando el array no ha cambiado.
 const tasksWithVideo = computed(() => {
-    // Si el número de tareas no cambió, retornar cache
     if (
         props.tasks.length === lastTasksLength.value &&
         tasksWithVideoCache.value.length > 0
@@ -136,29 +116,21 @@ const tasksWithVideo = computed(() => {
         return tasksWithVideoCache.value;
     }
 
-    // Filtrar tareas con video
     const filtered = props.tasks.filter(
         (task) => task.url_video && task.url_video.trim() !== "",
     );
 
-    // Actualizar cache
     tasksWithVideoCache.value = filtered;
     lastTasksLength.value = props.tasks.length;
-
-    console.log(
-        `🎬 Filtradas ${filtered.length} tareas con video de ${props.tasks.length} totales`,
-    );
 
     return filtered;
 });
 
-// Tarea actual mostrada
 const currentTask = computed(() => {
     if (tasksWithVideo.value.length === 0) return null;
     return tasksWithVideo.value[currentTaskIndex.value];
 });
 
-// Calcular el siguiente índice aleatorio sin repetir el actual
 const getRandomNextIndex = () => {
     if (tasksWithVideo.value.length <= 1) return null;
 
@@ -170,43 +142,28 @@ const getRandomNextIndex = () => {
     return newIndex;
 };
 
-// Precargar metadata del siguiente video
 const preloadNextVideo = async () => {
     if (tasksWithVideo.value.length <= 1) return;
 
-    // Calcular siguiente índice
     const nextIndex = getRandomNextIndex();
     if (nextIndex === null) return;
 
     preloadedNextIndex.value = nextIndex;
     const nextTask = tasksWithVideo.value[nextIndex];
 
-    // Verificar si hay versión HD disponible
     const videoUrl = await checkAndUpgradeToHD(nextTask.url_video, nextTask);
 
-    // Crear elemento de precarga si no existe
     if (!preloadElement.value) {
         preloadElement.value = document.createElement("video");
         preloadElement.value.preload = "metadata";
         preloadElement.value.style.display = "none";
     }
 
-    // Cargar metadata del siguiente video (HD si está disponible)
     preloadElement.value.src = videoUrl;
-
-    console.log(
-        `🎬 Precargando metadata del siguiente video: ${nextTask.name}`,
-    );
 };
 
-// Seleccionar tarea aleatoria evitando repetir la anterior
 const randomizeTask = () => {
-    // Si está en cooldown, no hacer nada
-    if (isRandomizing.value) {
-        console.log(`⏳ Cooldown activo: ${cooldownSeconds.value}s restantes`);
-        return;
-    }
-
+    if (isRandomizing.value) return;
     if (tasksWithVideo.value.length === 0) return;
 
     if (tasksWithVideo.value.length === 1) {
@@ -214,18 +171,14 @@ const randomizeTask = () => {
         return;
     }
 
-    // Activar cooldown
     isRandomizing.value = true;
     cooldownSeconds.value = 6;
 
-    // Si hay un video precargado, usarlo
     if (preloadedNextIndex.value !== null) {
         previousIndex.value = currentTaskIndex.value;
         currentTaskIndex.value = preloadedNextIndex.value;
         preloadedNextIndex.value = null;
-        console.log(`✅ Usando video precargado`);
     } else {
-        // Si no hay precarga, seleccionar random normalmente
         let newIndex;
         do {
             newIndex = Math.floor(Math.random() * tasksWithVideo.value.length);
@@ -235,7 +188,6 @@ const randomizeTask = () => {
         currentTaskIndex.value = newIndex;
     }
 
-    // Countdown de 3 segundos
     cooldownInterval = setInterval(() => {
         cooldownSeconds.value--;
 
@@ -243,12 +195,10 @@ const randomizeTask = () => {
             clearInterval(cooldownInterval);
             isRandomizing.value = false;
             cooldownSeconds.value = 0;
-            console.log(`✅ Cooldown terminado, botón habilitado`);
         }
     }, 1000);
 };
 
-// Seleccionar la tarea actual y cerrar modal
 const selectCurrentTask = () => {
     if (currentTask.value) {
         emit("select-task", currentTask.value);
@@ -256,23 +206,21 @@ const selectCurrentTask = () => {
     }
 };
 
-// Cerrar modal
 const closeModal = () => {
     emit("close");
 };
 
-// Cerrar con ESC
 const handleKeydown = (e) => {
     if (e.key === "Escape") {
         closeModal();
     }
 };
 
-// Watch para precargar el siguiente video después de cargar el actual
+// Precarga el siguiente video 2 segundos después de que cambia el actual,
+// para que el usuario no espere al siguiente cambio.
 watch(
     currentTaskIndex,
     async () => {
-        // Esperar 2 segundos después de cambiar el video para precargar el siguiente
         await nextTick();
         setTimeout(() => {
             preloadNextVideo();
@@ -281,7 +229,6 @@ watch(
     { immediate: false },
 );
 
-// Inicializar con tarea aleatoria al abrir
 onMounted(() => {
     if (props.isOpen && tasksWithVideo.value.length > 0) {
         randomizeTask();
@@ -292,12 +239,10 @@ onMounted(() => {
 onUnmounted(() => {
     window.removeEventListener("keydown", handleKeydown);
 
-    // Limpiar interval de cooldown
     if (cooldownInterval) {
         clearInterval(cooldownInterval);
     }
 
-    // Limpiar elemento de precarga
     if (preloadElement.value) {
         preloadElement.value.src = "";
         preloadElement.value = null;
