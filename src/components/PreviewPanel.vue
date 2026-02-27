@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from "vue";
+import { ref, watch } from "vue";
 
 const props = defineProps({
     promptText: String,
@@ -10,12 +10,8 @@ const emit = defineEmits(["update-prompt"]);
 
 const copyButtonText = ref("Copiar");
 
-// Ref local para el valor visual del textarea.
-// Se actualiza inmediatamente en cada keystroke para que el cursor no salte,
-// pero la emisión al padre (que dispara reactividad global) va debounceada.
 const localText = ref(props.promptText || "");
 
-// Sincronizar si el padre cambia el texto (ej. al cargar otra tarea)
 watch(
     () => props.promptText,
     (newVal) => {
@@ -25,32 +21,12 @@ watch(
     },
 );
 
-// Stats calculados sobre la ref local con debounce propio:
-// no necesitan ser exactos al milisegundo, solo al pausar.
-const promptStats = ref({ characters: 0, words: 0, lines: 0 });
-
-let statsDebounce = null;
-const updateStats = (text) => {
-    clearTimeout(statsDebounce);
-    statsDebounce = setTimeout(() => {
-        promptStats.value = {
-            characters: text.length,
-            words: text.split(/\s+/).filter((w) => w.length > 0).length,
-            lines: text.split("\n").length,
-        };
-    }, 300);
-};
-
-// Inicializar stats al montar
-updateStats(localText.value);
-
 let inputDebounce = null;
 const handleInput = (e) => {
     const val = e.target.value;
-    localText.value = val; // Actualización visual inmediata (no reactiva global)
-    updateStats(val); // Stats con debounce 300ms
+    localText.value = val;
     clearTimeout(inputDebounce);
-    inputDebounce = setTimeout(() => emit("update-prompt", val), 150); // Emisión al padre 150ms
+    inputDebounce = setTimeout(() => emit("update-prompt", val), 150);
 };
 
 const copyToClipboard = async () => {
@@ -69,16 +45,6 @@ const copyToClipboard = async () => {
 <template>
     <aside class="preview-side" :class="{ mobile: isMobile }">
         <div class="preview-content">
-            <div class="card-header">
-                <div class="stats">
-                    <span class="stat-item"
-                        >{{ promptStats.characters }}ch</span
-                    >
-                    <span class="stat-item">{{ promptStats.words }}p</span>
-                    <span class="stat-item">{{ promptStats.lines }}l</span>
-                </div>
-            </div>
-
             <div class="prompt-scroll">
                 <textarea
                     :value="localText"
@@ -125,7 +91,6 @@ const copyToClipboard = async () => {
     flex: 0 0 40%;
     background: var(--bg-secondary);
     padding: 10px;
-    /*overflow-y: auto;*/
 }
 
 .preview-side.mobile {
@@ -142,25 +107,6 @@ const copyToClipboard = async () => {
     display: flex;
     flex-direction: column;
     min-height: calc(100vh - 80px);
-}
-
-.card-header {
-    margin-bottom: 16px;
-}
-
-.stats {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.stat-item {
-    font-size: 11px;
-    color: var(--text-secondary);
-    padding: 4px 8px;
-    background: var(--bg-secondary);
-    border-radius: 6px;
-    font-weight: 600;
 }
 
 .prompt-scroll {
