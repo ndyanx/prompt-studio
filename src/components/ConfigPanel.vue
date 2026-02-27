@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import VideoPreview from "./VideoPreview.vue";
 import { usePromptManager } from "../composables/usePromptManager";
 
@@ -20,6 +20,30 @@ const emit = defineEmits([
 
 const { importTasks, updateMediaSlot, addMediaSlot, removeMediaSlot } =
     usePromptManager();
+
+const confirmDelete = ref(null); // index del slot a eliminar, null = cerrado
+const confirmInput = ref("");
+
+const requestRemoveSlot = (index) => {
+    confirmDelete.value = index;
+    confirmInput.value = "";
+};
+
+const confirmRemoveSlot = () => {
+    if (
+        confirmDelete.value !== null &&
+        confirmInput.value.toLowerCase() === "eliminar"
+    ) {
+        removeMediaSlot(confirmDelete.value);
+        confirmDelete.value = null;
+        confirmInput.value = "";
+    }
+};
+
+const cancelRemoveSlot = () => {
+    confirmDelete.value = null;
+    confirmInput.value = "";
+};
 
 const handleImport = async () => {
     const input = document.createElement("input");
@@ -200,7 +224,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         </header>
 
         <!-- Lista de slots de media -->
-        <div v-if="!showAlbum" class="media-list">
+        <div v-if="!showAlbum && confirmDelete === null" class="media-list">
             <div
                 v-for="(slot, index) in mediaList"
                 :key="index"
@@ -211,7 +235,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                     <span class="slot-label">Post {{ index + 1 }}</span>
                     <button
                         class="remove-slot-btn"
-                        @click="removeMediaSlot(index)"
+                        @click="requestRemoveSlot(index)"
                         :disabled="mediaList.length <= 1"
                         title="Eliminar este post"
                     >
@@ -257,6 +281,49 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         </div>
 
         <div class="mobile-spacer"></div>
+
+        <!-- Modal confirmación eliminar slot -->
+        <Teleport to="body">
+            <div
+                v-if="confirmDelete !== null"
+                class="modal-overlay"
+                @click.self="cancelRemoveSlot"
+            >
+                <div class="modal-box">
+                    <p class="modal-text">
+                        ¿Eliminar Post {{ confirmDelete + 1 }}?
+                    </p>
+                    <p class="modal-sub">
+                        Se perderán la URL del post y el video asociado.
+                    </p>
+                    <input
+                        v-model="confirmInput"
+                        class="modal-input"
+                        placeholder='Escribe "eliminar" para confirmar'
+                        @keyup.enter="confirmRemoveSlot"
+                        @keyup.esc="cancelRemoveSlot"
+                        autofocus
+                    />
+                    <div class="modal-actions">
+                        <button
+                            class="modal-btn cancel"
+                            @click="cancelRemoveSlot"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            class="modal-btn confirm"
+                            @click="confirmRemoveSlot"
+                            :disabled="
+                                confirmInput.toLowerCase() !== 'eliminar'
+                            "
+                        >
+                            Eliminar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </main>
 </template>
 
@@ -519,5 +586,104 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         height: 100px;
         min-height: 100px;
     }
+}
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 24px;
+    width: 300px;
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.modal-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.modal-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+}
+
+.modal-btn.cancel {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.modal-btn.cancel:hover {
+    background: var(--hover-bg);
+}
+
+.modal-input {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    margin-bottom: 16px;
+    transition: border-color 0.2s;
+}
+
+.modal-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.1);
+}
+
+.modal-input::placeholder {
+    color: var(--text-secondary);
+}
+
+.modal-btn.confirm {
+    background: #ff3b30;
+    color: white;
+    border-color: #ff3b30;
+    transition: all 0.2s;
+}
+
+.modal-btn.confirm:hover:not(:disabled) {
+    background: #ff453a;
+    border-color: #ff453a;
+}
+
+.modal-btn.confirm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 </style>
