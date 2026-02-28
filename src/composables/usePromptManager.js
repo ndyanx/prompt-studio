@@ -2,6 +2,8 @@ import { ref, watch, onMounted, onUnmounted } from "vue";
 import { db, Task, initDB, normalizeTask } from "../db/db";
 import { supabase } from "../supabase/supabaseClient";
 
+// ─── Estado singleton de módulo ───────────────────────────────────────────────
+
 const tasks = ref([]);
 const currentTask = ref(null);
 const promptText = ref("");
@@ -14,12 +16,81 @@ const mediaList = ref([{ url_post: "", url_video: "" }]);
 let initialized = false;
 let saveTimeout = null;
 
-// Helper: serializa mediaList a objeto plano seguro para Dexie (sin proxies Vue)
+// ─── Helpers internos ────────────────────────────────────────────────────────
+
+/** Serializa mediaList a objeto plano seguro para Dexie (sin Proxies Vue) */
 const serializeMedia = () =>
   mediaList.value.map((m) => ({
     url_post: m.url_post || "",
     url_video: m.url_video || "",
   }));
+
+/** Devuelve el nombre de la tabla según si hay sesión activa o no */
+const getTable = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return session ? "tasks_auth" : "tasks_local";
+};
+
+/**
+ * Construye el objeto plano que se persiste en Dexie.
+ * Usa JSON.parse/stringify para eliminar Proxies de Vue.
+ */
+const buildTaskPayload = (task, media) =>
+  JSON.parse(
+    JSON.stringify({
+      id: task.id,
+      name: task.name,
+      prompt: task.prompt,
+      media,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+    }),
+  );
+
+/**
+ * Persiste currentTask con los valores actuales de promptText y mediaList,
+ * y sincroniza el array tasks[] en memoria.
+ */
+const persistCurrentTask = async () => {
+  if (!currentTask.value) return;
+
+  const tableName = await getTable();
+  const media = serializeMedia();
+
+  currentTask.value.prompt = promptText.value;
+  currentTask.value.media = media;
+  currentTask.value.updatedAt = Date.now();
+
+  const payload = buildTaskPayload(currentTask.value, media);
+  await db[tableName].put(payload);
+
+  const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
+  if (index !== -1) tasks.value[index] = { ...currentTask.value };
+};
+
+// ─── Watchers de auto-guardado ────────────────────────────────────────────────
+// Se registran a nivel de módulo (una sola vez, fuera de cualquier onMounted)
+// para que no estén vinculados al ciclo de vida de ningún componente.
+//
+// Si estuvieran dentro de onMounted, morirían cuando el primer componente
+// que los registró se desmonte, dejando el auto-guardado inactivo para el resto.
+//
+// Llamamos a persistCurrentTask (nivel módulo) en lugar de saveCurrentTask
+// (nivel composable) porque los watch() se definen antes de que el composable
+// sea instanciado y saveCurrentTask no existe aún en este scope.
+
+const scheduleSave = () => {
+  if (!currentTask.value) return;
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(persistCurrentTask, 500);
+};
+
+watch(promptText, scheduleSave);
+watch(mediaList, scheduleSave, { deep: true });
+
+// ─── Composable ──────────────────────────────────────────────────────────────
 
 export function usePromptManager() {
   const clearLocalData = async () => {
@@ -35,51 +106,22 @@ export function usePromptManager() {
   };
 
   onMounted(async () => {
-    if (!initialized) {
-      initialized = true;
-      await initDB();
+    if (initialized) return;
+    initialized = true;
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) {
-        await loadTasks();
-      }
+    await initDB();
 
-      window.addEventListener("user-signed-out", clearLocalData);
-      window.addEventListener("data-restored", reloadTasks);
-      window.addEventListener("create-default-task", async () => {
-        await createNewTask();
-      });
-
-      // Auto-guardado con debounce 500ms
-      watch(promptText, () => {
-        if (currentTask.value) {
-          clearTimeout(saveTimeout);
-          saveTimeout = setTimeout(() => saveCurrentTask(), 500);
-        }
-      });
-
-      // Watch profundo sobre mediaList para detectar cambios en cualquier slot
-      watch(
-        mediaList,
-        () => {
-          if (currentTask.value) {
-            clearTimeout(saveTimeout);
-            saveTimeout = setTimeout(() => saveCurrentTask(), 500);
-          }
-        },
-        { deep: true },
-      );
-    }
-  });
-
-  const getTable = async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    return session ? "tasks_auth" : "tasks_local";
-  };
+    if (!session) {
+      await loadTasks();
+    }
+
+    window.addEventListener("user-signed-out", clearLocalData);
+    window.addEventListener("data-restored", reloadTasks);
+    window.addEventListener("create-default-task", createNewTask);
+  });
 
   const loadTasks = async (skipIfEmpty = false) => {
     try {
@@ -104,7 +146,7 @@ export function usePromptManager() {
         .reverse()
         .toArray();
 
-      // Normalizar al vuelo por si hay tareas en formato v2 que no pasaron por la migración
+      // Normalizar al vuelo por si hay tareas en formato v2 sin migración
       tasks.value = allTasks.map(normalizeTask);
 
       if (tasks.value.length > 0) {
@@ -143,34 +185,10 @@ export function usePromptManager() {
     mediaList.value = normalized.media.map((m) => ({ ...m }));
   };
 
+  /** Guarda el estado actual de promptText y mediaList en la tarea activa */
   const saveCurrentTask = async () => {
-    if (!currentTask.value) return;
-
     try {
-      const tableName = await getTable();
-
-      currentTask.value.prompt = promptText.value;
-      currentTask.value.media = serializeMedia();
-      currentTask.value.updatedAt = Date.now();
-
-      // JSON.parse/stringify para garantizar objeto plano sin Proxies de Vue
-      const taskToSave = JSON.parse(
-        JSON.stringify({
-          id: currentTask.value.id,
-          name: currentTask.value.name,
-          prompt: currentTask.value.prompt,
-          media: serializeMedia(),
-          createdAt: currentTask.value.createdAt,
-          updatedAt: currentTask.value.updatedAt,
-        }),
-      );
-
-      await db[tableName].put(taskToSave);
-
-      const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
-      if (index !== -1) {
-        tasks.value[index] = { ...currentTask.value };
-      }
+      await persistCurrentTask();
     } catch (error) {
       console.error("Error guardando tarea:", error);
     }
@@ -178,29 +196,10 @@ export function usePromptManager() {
 
   const updateTaskName = async (name) => {
     if (!currentTask.value) return;
-
     try {
-      const tableName = await getTable();
       currentTask.value.name = name;
       currentTask.value.updatedAt = Date.now();
-
-      const taskToSave = JSON.parse(
-        JSON.stringify({
-          id: currentTask.value.id,
-          name: currentTask.value.name,
-          prompt: currentTask.value.prompt,
-          media: serializeMedia(),
-          createdAt: currentTask.value.createdAt,
-          updatedAt: currentTask.value.updatedAt,
-        }),
-      );
-
-      await db[tableName].put(taskToSave);
-
-      const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
-      if (index !== -1) {
-        tasks.value[index] = { ...currentTask.value };
-      }
+      await persistCurrentTask();
     } catch (error) {
       console.error("Error actualizando nombre:", error);
     }
@@ -327,32 +326,34 @@ export function usePromptManager() {
     });
   };
 
-  // Actualiza un slot específico del mediaList activo.
-  // Llamado por VideoPreview cuando el usuario extrae un video o escribe una URL.
+  // ─── Gestión de slots de media ────────────────────────────────────────────
+
+  /** Actualiza un slot específico. Llamado por VideoPreview al extraer un video. */
   const updateMediaSlot = async (index, { url_post, url_video }) => {
-    if (index >= 0 && index < mediaList.value.length) {
-      mediaList.value[index] = { url_post, url_video };
-      clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(() => saveCurrentTask(), 500);
-    }
+    if (index < 0 || index >= mediaList.value.length) return;
+    mediaList.value[index] = { url_post, url_video };
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(saveCurrentTask, 500);
   };
 
-  // Agrega un nuevo slot vacío al final. Guarda inmediatamente sin esperar el debounce.
+  /** Agrega un slot vacío al final y guarda de inmediato. */
   const addMediaSlot = async () => {
     mediaList.value.push({ url_post: "", url_video: "" });
     await saveCurrentTask();
   };
 
-  // Elimina el slot en el índice dado. Guarda inmediatamente.
-  // Protegido: nunca borra si solo queda uno.
+  /** Elimina el slot en el índice dado. Protegido: nunca borra si solo queda uno. */
   const removeMediaSlot = async (index) => {
     if (mediaList.value.length <= 1) return;
     mediaList.value.splice(index, 1);
     await saveCurrentTask();
   };
 
-  // Usado por AlbumModal para upgrade a HD de un slot específico.
-  // mediaIndex: qué slot de media actualizar (default 0 para compatibilidad).
+  /**
+   * Actualiza la url_video de un slot específico de cualquier tarea.
+   * Usado por AlbumModal para upgrade a HD.
+   * mediaIndex: índice del slot a actualizar (default 0).
+   */
   const updateTaskVideoUrl = async (taskId, url_video, mediaIndex = 0) => {
     try {
       const tableName = await getTable();
@@ -371,31 +372,18 @@ export function usePromptManager() {
       };
       normalizedTask.updatedAt = Date.now();
 
-      const taskToSave = JSON.parse(
-        JSON.stringify({
-          id: normalizedTask.id,
-          name: normalizedTask.name,
-          prompt: normalizedTask.prompt,
-          media: normalizedTask.media,
-          createdAt: normalizedTask.createdAt,
-          updatedAt: normalizedTask.updatedAt,
-        }),
-      );
+      const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
+      await db[tableName].put(payload);
 
-      await db[tableName].put(taskToSave);
-
-      // Actualizar tasks[] en memoria
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) tasks.value[index] = normalizedTask;
 
-      // Si es la tarea activa, actualizar también mediaList
-      if (currentTask.value?.id === taskId) {
-        if (mediaList.value[mediaIndex]) {
-          mediaList.value[mediaIndex] = {
-            ...mediaList.value[mediaIndex],
-            url_video,
-          };
-        }
+      // Si es la tarea activa, reflejar el cambio en mediaList
+      if (currentTask.value?.id === taskId && mediaList.value[mediaIndex]) {
+        mediaList.value[mediaIndex] = {
+          ...mediaList.value[mediaIndex],
+          url_video,
+        };
       }
     } catch (error) {
       console.error("Error actualizando URL de video:", error);

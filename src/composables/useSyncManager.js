@@ -3,14 +3,15 @@ import { supabase } from "../supabase/supabaseClient";
 import { db } from "../db/db";
 
 const MAX_RETRIES = 3;
-const THROTTLE_TIME = 10000; // 10 segundos entre sincronizaciones manuales
+const THROTTLE_TIME = 10000;
 let isSyncing = false;
 let retryCount = 0;
-let throttleTimeout = null;
+let throttleInterval = null;
 let isRestoringData = false;
+// IDs de los setTimeout de reintento, para cancelarlos en handleSignOut si es necesario
+const retryTimeouts = new Set();
 
-// Estado compartido como singleton para que múltiples componentes
-// lean el mismo estado sin duplicar listeners ni lógica
+// Estado singleton compartido entre instancias
 const lastSyncTime = ref(null);
 const isSyncingNow = ref(false);
 const syncError = ref(null);
@@ -20,11 +21,35 @@ const isThrottled = ref(false);
 const throttleSecondsRemaining = ref(0);
 
 let isInitialized = false;
-let cleanupFunctions = [];
+
+// ─── Helpers internos ────────────────────────────────────────────────────────
+
+/** Verifica conectividad. Devuelve null si hay conexión, o un string de error. */
+const getOfflineError = () => {
+  if (!navigator.onLine || isOffline.value) return "Sin conexión a internet";
+  return null;
+};
+
+/** Obtiene la sesión activa. Lanza si no hay sesión autenticada. */
+const getAuthSession = async () => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) throw new Error("Usuario no autenticado");
+  return session;
+};
+
+/** Muestra syncError temporalmente y lo limpia después de `ms` milisegundos. */
+const setTemporaryError = (message, ms = 3000) => {
+  syncError.value = message;
+  setTimeout(() => {
+    syncError.value = null;
+  }, ms);
+};
+
+// ─── Composable ──────────────────────────────────────────────────────────────
 
 export function useSyncManager() {
-  // Solo se sincronizan datos de tasks_auth (usuario autenticado).
-  // tasks_local es offline-only y nunca se envía a Supabase.
   const generateSnapshot = async () => {
     try {
       const allTasks = await db.tasks_auth.toArray();
@@ -34,7 +59,7 @@ export function useSyncManager() {
         version: "2.0.0",
         timestamp: new Date().toISOString(),
         tasks: allTasks,
-        settings: settings,
+        settings,
         stats: {
           totalTasks: allTasks.length,
         },
@@ -45,20 +70,18 @@ export function useSyncManager() {
     }
   };
 
-  // Bloquea sincronizaciones adicionales durante THROTTLE_TIME segundos
-  // para evitar escrituras excesivas en Supabase
+  /** Bloquea sincronizaciones adicionales durante THROTTLE_TIME ms */
   const startThrottle = () => {
     isThrottled.value = true;
-    throttleSecondsRemaining.value = 10;
+    throttleSecondsRemaining.value = THROTTLE_TIME / 1000;
 
-    if (throttleTimeout) clearInterval(throttleTimeout);
+    if (throttleInterval) clearInterval(throttleInterval);
 
-    throttleTimeout = setInterval(() => {
+    throttleInterval = setInterval(() => {
       throttleSecondsRemaining.value--;
-
       if (throttleSecondsRemaining.value <= 0) {
-        clearInterval(throttleTimeout);
-        throttleTimeout = null;
+        clearInterval(throttleInterval);
+        throttleInterval = null;
         isThrottled.value = false;
         throttleSecondsRemaining.value = 0;
       }
@@ -68,6 +91,8 @@ export function useSyncManager() {
   const syncToSupabase = async (isManual = true) => {
     if (isSyncing)
       return { success: false, error: "Sincronización en progreso" };
+    if (!isManual)
+      return { success: false, error: "Solo sincronización manual" };
 
     if (isThrottled.value) {
       return {
@@ -77,16 +102,14 @@ export function useSyncManager() {
       };
     }
 
-    if (!isManual)
-      return { success: false, error: "Solo sincronización manual" };
-
-    if (!navigator.onLine || isOffline.value) {
-      syncError.value = "Sin conexión a internet";
-      setTimeout(() => {
-        syncError.value = null;
-      }, 3000);
-      return { success: false, error: "Sin conexión a internet" };
+    const offlineError = getOfflineError();
+    if (offlineError) {
+      setTemporaryError(offlineError);
+      return { success: false, error: offlineError };
     }
+
+    // Resetear contador al inicio de cada intento manual para que los retries funcionen siempre
+    if (isManual) retryCount = 0;
 
     isSyncing = true;
     isSyncingNow.value = true;
@@ -94,11 +117,7 @@ export function useSyncManager() {
     syncSuccess.value = false;
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) throw new Error("Usuario no autenticado");
-
+      const session = await getAuthSession();
       const snapshot = await generateSnapshot();
 
       const { error } = await supabase.from("user_snapshots").upsert(
@@ -120,7 +139,6 @@ export function useSyncManager() {
       lastSyncTime.value = new Date().toISOString();
       retryCount = 0;
       syncSuccess.value = true;
-
       startThrottle();
 
       setTimeout(() => {
@@ -142,15 +160,14 @@ export function useSyncManager() {
 
       syncError.value = errorMessage;
 
-      // Reintento con backoff exponencial, solo cuando hay conexión
-      if (navigator.onLine) {
+      if (navigator.onLine && isManual && retryCount < MAX_RETRIES) {
         retryCount++;
-        if (retryCount <= MAX_RETRIES && isManual) {
-          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-          setTimeout(() => {
-            syncToSupabase(true);
-          }, delay);
-        }
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+        const retryId = setTimeout(() => {
+          retryTimeouts.delete(retryId);
+          syncToSupabase(true);
+        }, delay);
+        retryTimeouts.add(retryId);
       }
 
       return { success: false, error: errorMessage };
@@ -160,26 +177,19 @@ export function useSyncManager() {
     }
   };
 
-  const manualSync = async () => {
-    return await syncToSupabase(true);
-  };
+  const manualSync = () => syncToSupabase(true);
 
-  // Descarga el snapshot más reciente desde Supabase y lo escribe en tasks_auth.
-  // Limpia tasks_auth antes de restaurar para evitar duplicados.
+  /**
+   * Descarga el snapshot más reciente desde Supabase y lo escribe en tasks_auth.
+   * Limpia tasks_auth antes de restaurar para evitar duplicados.
+   */
   const restoreFromSupabase = async () => {
-    try {
-      if (!navigator.onLine || isOffline.value) {
-        return {
-          success: false,
-          error: "Sin conexión a internet",
-          offline: true,
-        };
-      }
+    const offlineError = getOfflineError();
+    if (offlineError)
+      return { success: false, error: offlineError, offline: true };
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (!session) throw new Error("Usuario no autenticado");
+    try {
+      const session = await getAuthSession();
 
       const { data, error } = await supabase
         .from("user_snapshots")
@@ -200,10 +210,9 @@ export function useSyncManager() {
         return { success: false, message: "No hay snapshots guardados" };
 
       const snapshot = data.snapshot_data;
-
       await db.tasks_auth.clear();
 
-      if (snapshot.tasks && snapshot.tasks.length > 0) {
+      if (snapshot.tasks?.length > 0) {
         await db.tasks_auth.bulkAdd(snapshot.tasks);
       }
 
@@ -214,17 +223,22 @@ export function useSyncManager() {
       };
     } catch (error) {
       console.error("Error restaurando snapshot:", error);
-
-      if (!navigator.onLine) {
-        return {
-          success: false,
-          error: "Sin conexión a internet",
-          offline: true,
-        };
-      }
-
+      const offlineErr = getOfflineError();
+      if (offlineErr)
+        return { success: false, error: offlineErr, offline: true };
       return { success: false, error: error.message };
     }
+  };
+
+  // ─── Manejadores de eventos globales ──────────────────────────────────────
+
+  const handleOnline = () => {
+    isOffline.value = false;
+    syncError.value = null;
+  };
+
+  const handleOffline = () => {
+    isOffline.value = true;
   };
 
   const handleSignOut = () => {
@@ -236,63 +250,46 @@ export function useSyncManager() {
     throttleSecondsRemaining.value = 0;
     isRestoringData = false;
 
-    if (throttleTimeout) {
-      clearInterval(throttleTimeout);
-      throttleTimeout = null;
+    // Cancelar reintentos pendientes para evitar sync post-logout
+    retryTimeouts.forEach(clearTimeout);
+    retryTimeouts.clear();
+
+    if (throttleInterval) {
+      clearInterval(throttleInterval);
+      throttleInterval = null;
     }
 
-    // Pequeño delay para que clearLocalData() en usePromptManager termine antes de recargar
+    // Pequeño delay para que clearLocalData() en usePromptManager termine antes
     setTimeout(() => {
       window.dispatchEvent(new CustomEvent("data-restored"));
     }, 100);
   };
 
-  const handleOnline = () => {
-    isOffline.value = false;
-    syncError.value = null;
-  };
-
-  const handleOffline = () => {
-    isOffline.value = true;
-  };
-
-  // Al iniciar sesión, restaura los datos desde Supabase y notifica a usePromptManager.
-  // El flag isRestoringData previene ejecuciones simultáneas si el evento se dispara más de una vez.
+  /**
+   * Al iniciar sesión: restaura datos desde Supabase y notifica a usePromptManager.
+   * El flag isRestoringData previene ejecuciones simultáneas.
+   */
   const handleSignIn = async () => {
     if (isRestoringData) return;
-
     isRestoringData = true;
 
     try {
       const result = await restoreFromSupabase();
+      const hasRestoredTasks = result.success && result.tasks > 0;
+      const authTasksCount = await db.tasks_auth.count();
 
-      if (result.offline) {
+      if (hasRestoredTasks || authTasksCount > 0) {
         window.dispatchEvent(new CustomEvent("data-restored"));
-      } else if (result.success && result.tasks > 0) {
-        window.dispatchEvent(new CustomEvent("data-restored"));
-      } else if (result.success && result.tasks === 0) {
-        const authTasks = await db.tasks_auth.count();
-        if (authTasks === 0) {
-          window.dispatchEvent(new CustomEvent("create-default-task"));
-        } else {
-          window.dispatchEvent(new CustomEvent("data-restored"));
-        }
       } else {
-        const authTasks = await db.tasks_auth.count();
-        if (authTasks === 0) {
-          window.dispatchEvent(new CustomEvent("create-default-task"));
-        } else {
-          window.dispatchEvent(new CustomEvent("data-restored"));
-        }
+        // Sin datos en Supabase ni en local: crear tarea por defecto
+        window.dispatchEvent(new CustomEvent("create-default-task"));
       }
     } catch (error) {
       console.error("Error restaurando datos al iniciar sesión:", error);
-      const authTasks = await db.tasks_auth.count();
-      if (authTasks > 0) {
-        window.dispatchEvent(new CustomEvent("data-restored"));
-      } else {
-        window.dispatchEvent(new CustomEvent("create-default-task"));
-      }
+      const authTasksCount = await db.tasks_auth.count();
+      const event =
+        authTasksCount > 0 ? "data-restored" : "create-default-task";
+      window.dispatchEvent(new CustomEvent(event));
     } finally {
       setTimeout(() => {
         isRestoringData = false;
@@ -309,8 +306,7 @@ export function useSyncManager() {
       if (session) {
         await handleSignIn();
       } else {
-        // Sin sesión: verificar si hay datos huérfanos en tasks_auth
-        // (puede ocurrir si el usuario borró el localStorage manualmente)
+        // Sin sesión: limpiar datos huérfanos en tasks_auth si los hay
         const authTasksCount = await db.tasks_auth.count();
         if (authTasksCount > 0) {
           console.warn(
@@ -329,37 +325,37 @@ export function useSyncManager() {
     }
   };
 
+  // ─── Ciclo de vida ────────────────────────────────────────────────────────
+
   onMounted(async () => {
-    if (!isInitialized) {
-      isInitialized = true;
+    if (isInitialized) return;
+    isInitialized = true;
 
-      isOffline.value = !navigator.onLine;
+    isOffline.value = !navigator.onLine;
+    await initSync();
 
-      await initSync();
-
-      window.addEventListener("user-signed-out", handleSignOut);
-      window.addEventListener("user-signed-in", handleSignIn);
-      window.addEventListener("online", handleOnline);
-      window.addEventListener("offline", handleOffline);
-    }
+    window.addEventListener("user-signed-out", handleSignOut);
+    window.addEventListener("user-signed-in", handleSignIn);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
   });
 
   onUnmounted(() => {
-    const cleanup = () => {
-      if (throttleTimeout) {
-        clearInterval(throttleTimeout);
-        throttleTimeout = null;
-      }
+    // Cancelar reintentos pendientes para evitar sync post-logout
+    retryTimeouts.forEach(clearTimeout);
+    retryTimeouts.clear();
 
-      window.removeEventListener("user-signed-out", handleSignOut);
-      window.removeEventListener("user-signed-in", handleSignIn);
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
+    if (throttleInterval) {
+      clearInterval(throttleInterval);
+      throttleInterval = null;
+    }
 
-      isInitialized = false;
-    };
+    window.removeEventListener("user-signed-out", handleSignOut);
+    window.removeEventListener("user-signed-in", handleSignIn);
+    window.removeEventListener("online", handleOnline);
+    window.removeEventListener("offline", handleOffline);
 
-    cleanupFunctions.push(cleanup);
+    isInitialized = false;
   });
 
   return {

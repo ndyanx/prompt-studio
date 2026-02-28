@@ -332,7 +332,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     flex: 0 0 60%;
     display: flex;
     flex-direction: column;
-    padding: 30px;
+    padding: 40px;
     border-right: 1px solid var(--border-color);
     background: var(--bg-primary);
     overflow-y: auto;

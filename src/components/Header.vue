@@ -65,8 +65,42 @@ const handleUserAction = () => {
     <header class="app-header">
         <div class="header-left">
             <h1 class="app-title">
-                <span class="title-icon">🎨</span>
-                Dynamic Prompt Studio
+                <span class="title-icon">
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 100 100"
+                        width="28"
+                        height="28"
+                        class="title-svg"
+                    >
+                        <circle cx="50" cy="50" r="50" class="svg-circle" />
+                        <path
+                            d="M20 50 A30 30 0 0 1 50 20"
+                            stroke="#BB86FC"
+                            stroke-width="6"
+                            fill="none"
+                        />
+                        <path
+                            d="M50 20 A30 30 0 0 1 80 50"
+                            class="svg-arc-white"
+                            stroke-width="6"
+                            fill="none"
+                        />
+                        <path
+                            d="M80 50 A30 30 0 0 1 50 80"
+                            stroke="#BB86FC"
+                            stroke-width="6"
+                            fill="none"
+                        />
+                        <path
+                            d="M50 80 A30 30 0 0 1 20 50"
+                            class="svg-arc-white"
+                            stroke-width="6"
+                            fill="none"
+                        />
+                    </svg>
+                </span>
+                DixieLab
             </h1>
         </div>
 
@@ -544,7 +578,24 @@ const handleUserAction = () => {
 }
 
 .title-icon {
-    font-size: 24px;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+}
+
+/* El círculo de fondo siempre negro — es parte del diseño del logo */
+.svg-circle {
+    fill: #000000;
+}
+
+/* Los arcos blancos se vuelven negros en dark mode para seguir siendo visibles
+   sobre el círculo que también es negro. Se convierten a un gris claro. */
+.svg-arc-white {
+    stroke: #ffffff;
+}
+
+.dark-theme .svg-arc-white {
+    stroke: #cccccc;
 }
 
 .header-right {
@@ -1083,8 +1134,9 @@ const handleUserAction = () => {
         font-size: 16px;
     }
 
-    .title-icon {
-        font-size: 20px;
+    .title-icon svg {
+        width: 24px;
+        height: 24px;
     }
 }
 </style>
