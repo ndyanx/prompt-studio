@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { supabase } from "../supabase/supabaseClient";
+import { APP_EVENTS, emit } from "../events/events";
 
 export const useAuthStore = defineStore("auth", () => {
   // ─── Estado ───────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ export const useAuthStore = defineStore("auth", () => {
       if (error) throw error;
 
       // onAuthStateChange actualizará user.value automáticamente
-      window.dispatchEvent(new CustomEvent("user-signed-in"));
+      emit(APP_EVENTS.SIGNED_IN);
       return { success: true, user: data.user };
     } catch (error) {
       authError.value = error.message;
@@ -84,7 +85,7 @@ export const useAuthStore = defineStore("auth", () => {
       if (error) throw error;
 
       // onAuthStateChange pondrá user.value en null automáticamente
-      window.dispatchEvent(new CustomEvent("user-signed-out"));
+      emit(APP_EVENTS.SIGNED_OUT);
       return { success: true };
     } catch (error) {
       authError.value = error.message;

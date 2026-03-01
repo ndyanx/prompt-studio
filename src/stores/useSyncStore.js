@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { supabase } from "../supabase/supabaseClient";
 import { db } from "../db/db";
+import { APP_EVENTS, emit } from "../events/events";
 
 const MAX_RETRIES = 3;
 const THROTTLE_TIME = 10000;
@@ -42,6 +43,15 @@ export const useSyncStore = defineStore("sync", () => {
     setTimeout(() => {
       syncError.value = null;
     }, ms);
+  };
+
+  /** Cancela todos los retries pendientes y resetea el contador */
+  const clearPendingRetries = () => {
+    retryTimeouts.forEach(clearTimeout);
+    retryTimeouts.clear();
+    retryCount = 0;
+    isSyncing = false;
+    isSyncingNow.value = false;
   };
 
   // ─── Actions ──────────────────────────────────────────────────────────────
@@ -233,13 +243,12 @@ export const useSyncStore = defineStore("sync", () => {
     lastSyncTime.value = null;
     syncError.value = null;
     syncSuccess.value = false;
-    retryCount = 0;
     isThrottled.value = false;
     throttleSecondsRemaining.value = 0;
     isRestoringData = false;
 
-    retryTimeouts.forEach(clearTimeout);
-    retryTimeouts.clear();
+    // Limpia retries y estado de sync huérfanos
+    clearPendingRetries();
 
     if (throttleInterval) {
       clearInterval(throttleInterval);
@@ -247,7 +256,7 @@ export const useSyncStore = defineStore("sync", () => {
     }
 
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent("data-restored"));
+      emit(APP_EVENTS.DATA_RESTORED);
     }, 100);
   };
 
@@ -255,22 +264,27 @@ export const useSyncStore = defineStore("sync", () => {
     if (isRestoringData) return;
     isRestoringData = true;
 
+    // Si había retries de una sesión anterior, los cancelamos antes de restaurar
+    clearPendingRetries();
+
     try {
       const result = await restoreFromSupabase();
       const hasRestoredTasks = result.success && result.tasks > 0;
       const authTasksCount = await db.tasks_auth.count();
 
       if (hasRestoredTasks || authTasksCount > 0) {
-        window.dispatchEvent(new CustomEvent("data-restored"));
+        emit(APP_EVENTS.DATA_RESTORED);
       } else {
-        window.dispatchEvent(new CustomEvent("create-default-task"));
+        emit(APP_EVENTS.CREATE_DEFAULT_TASK);
       }
     } catch (error) {
       console.error("Error restaurando datos al iniciar sesión:", error);
       const authTasksCount = await db.tasks_auth.count();
-      const event =
-        authTasksCount > 0 ? "data-restored" : "create-default-task";
-      window.dispatchEvent(new CustomEvent(event));
+      emit(
+        authTasksCount > 0
+          ? APP_EVENTS.DATA_RESTORED
+          : APP_EVENTS.CREATE_DEFAULT_TASK,
+      );
     } finally {
       setTimeout(() => {
         isRestoringData = false;
@@ -281,6 +295,10 @@ export const useSyncStore = defineStore("sync", () => {
   const initSync = async () => {
     try {
       isOffline.value = !navigator.onLine;
+
+      // Limpia cualquier estado residual de una inicialización anterior
+      // (útil en hot-reload durante desarrollo o recargas rápidas)
+      clearPendingRetries();
 
       const {
         data: { session },
@@ -299,12 +317,12 @@ export const useSyncStore = defineStore("sync", () => {
 
         const localTasksCount = await db.tasks_local.count();
         if (localTasksCount === 0) {
-          window.dispatchEvent(new CustomEvent("create-default-task"));
+          emit(APP_EVENTS.CREATE_DEFAULT_TASK);
         }
       }
 
-      window.addEventListener("user-signed-out", handleSignOut);
-      window.addEventListener("user-signed-in", handleSignIn);
+      window.addEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
+      window.addEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
       window.addEventListener("online", handleOnline);
       window.addEventListener("offline", handleOffline);
     } catch (error) {
@@ -313,16 +331,15 @@ export const useSyncStore = defineStore("sync", () => {
   };
 
   const cleanup = () => {
-    retryTimeouts.forEach(clearTimeout);
-    retryTimeouts.clear();
+    clearPendingRetries();
 
     if (throttleInterval) {
       clearInterval(throttleInterval);
       throttleInterval = null;
     }
 
-    window.removeEventListener("user-signed-out", handleSignOut);
-    window.removeEventListener("user-signed-in", handleSignIn);
+    window.removeEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
+    window.removeEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
     window.removeEventListener("online", handleOnline);
     window.removeEventListener("offline", handleOffline);
   };

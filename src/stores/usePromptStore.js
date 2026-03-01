@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { db, Task, initDB, normalizeTask } from "../db/db";
 import { supabase } from "../supabase/supabaseClient";
+import { APP_EVENTS } from "../events/events";
 
 export const usePromptStore = defineStore("prompt", () => {
   // ─── Estado ───────────────────────────────────────────────────────────────
@@ -71,9 +72,6 @@ export const usePromptStore = defineStore("prompt", () => {
   };
 
   // ─── Auto-guardado ────────────────────────────────────────────────────────
-  // Los watchers van dentro del store. Pinia los registra correctamente
-  // y los mantiene activos mientras el store exista (toda la vida de la app).
-
   const scheduleSave = () => {
     if (!currentTask.value) return;
     clearTimeout(saveTimeout);
@@ -95,9 +93,9 @@ export const usePromptStore = defineStore("prompt", () => {
       await loadTasks();
     }
 
-    window.addEventListener("user-signed-out", clearLocalData);
-    window.addEventListener("data-restored", reloadTasks);
-    window.addEventListener("create-default-task", createNewTask);
+    window.addEventListener(APP_EVENTS.SIGNED_OUT, clearLocalData);
+    window.addEventListener(APP_EVENTS.DATA_RESTORED, reloadTasks);
+    window.addEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
   };
 
   const clearLocalData = async () => {
@@ -372,9 +370,9 @@ export const usePromptStore = defineStore("prompt", () => {
   };
 
   const cleanup = () => {
-    window.removeEventListener("user-signed-out", clearLocalData);
-    window.removeEventListener("data-restored", reloadTasks);
-    window.removeEventListener("create-default-task", createNewTask);
+    window.removeEventListener(APP_EVENTS.SIGNED_OUT, clearLocalData);
+    window.removeEventListener(APP_EVENTS.DATA_RESTORED, reloadTasks);
+    window.removeEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
   };
 
   return {
