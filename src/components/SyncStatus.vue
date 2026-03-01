@@ -1,7 +1,11 @@
 <script setup>
 import { computed, ref } from "vue";
-import { useSyncManager } from "../composables/useSyncManager";
-import { useAuth } from "../composables/useAuth";
+import { storeToRefs } from "pinia";
+import { useSyncStore } from "../stores/useSyncStore";
+import { useAuthStore } from "../stores/useAuthStore";
+
+const syncStore = useSyncStore();
+const authStore = useAuthStore();
 
 const {
     lastSyncTime,
@@ -11,9 +15,9 @@ const {
     isOffline,
     isThrottled,
     throttleSecondsRemaining,
-    manualSync,
-} = useSyncManager();
-const { user, isAuthenticated } = useAuth();
+} = storeToRefs(syncStore);
+
+const { isAuthenticated, user } = storeToRefs(authStore);
 
 const showSyncDetails = ref(false);
 
@@ -70,7 +74,7 @@ const syncStatusText = computed(() => {
 });
 
 const handleManualSync = async () => {
-    await manualSync();
+    await syncStore.manualSync();
 };
 </script>
 

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from "vue";
-import { useAuth } from "../composables/useAuth";
+import { useAuthStore } from "../stores/useAuthStore";
 
 const props = defineProps({
     isOpen: Boolean,
@@ -9,7 +9,7 @@ const props = defineProps({
 
 const emit = defineEmits(["close", "success"]);
 
-const { signIn, signUp, authError, isLoading } = useAuth();
+const { signIn, signUp, authError, isLoading } = useAuthStore();
 
 const email = ref("");
 const password = ref("");

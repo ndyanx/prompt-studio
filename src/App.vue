@@ -7,30 +7,19 @@ import TasksPanel from "./components/TasksPanel.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
 import AuthModal from "./components/AuthModal.vue";
 import AlbumModal from "./components/AlbumModal.vue";
-import SyncStatus from "./components/SyncStatus.vue";
-import { usePromptManager } from "./composables/usePromptManager";
-import { useTheme } from "./composables/useTheme";
-import { useAuth } from "./composables/useAuth";
-import { useSyncManager } from "./composables/useSyncManager";
 
-const { isDark, toggleTheme } = useTheme();
-const { user, isAuthenticated, signOut } = useAuth();
-const { restoreFromSupabase, manualSync } = useSyncManager();
-const {
-    promptText,
-    currentTask,
-    tasks,
-    mediaList,
-    loadTask,
-    loadTasks,
-    createNewTask,
-    updateTaskName,
-    deleteTask,
-    deleteAllTasks,
-    duplicateTask,
-    exportTasks,
-} = usePromptManager();
+// ─── Stores (reemplazan los composables) ──────────────────────────────────────
+import { useThemeStore } from "./stores/useThemeStore";
+import { useAuthStore } from "./stores/useAuthStore";
+import { useSyncStore } from "./stores/useSyncStore";
+import { usePromptStore } from "./stores/usePromptStore";
 
+const themeStore = useThemeStore();
+const authStore = useAuthStore();
+const syncStore = useSyncStore();
+const promptStore = usePromptStore();
+
+// ─── Estado local de UI (solo vive en este componente) ────────────────────────
 const showTasks = ref(false);
 const showAlbum = ref(false);
 const isMobile = ref(false);
@@ -49,16 +38,9 @@ const debouncedCheckMobile = () => {
     resizeTimeout = setTimeout(checkMobile, 150);
 };
 
-onMounted(async () => {
+onMounted(() => {
     checkMobile();
     window.addEventListener("resize", debouncedCheckMobile);
-
-    if (isAuthenticated.value) {
-        const result = await restoreFromSupabase();
-        if (result.success) {
-            await loadTasks();
-        }
-    }
 });
 
 onUnmounted(() => {
@@ -66,36 +48,33 @@ onUnmounted(() => {
     clearTimeout(resizeTimeout);
 });
 
-watch(isAuthenticated, (newVal) => {
-    if (newVal) {
-        showAuthModal.value = false;
-    }
-});
+// Cerrar modal cuando el usuario se autentica correctamente
+watch(
+    () => authStore.isAuthenticated,
+    (newVal) => {
+        if (newVal) showAuthModal.value = false;
+    },
+);
 
-const handleAuthSuccess = async (user) => {
-    const result = await restoreFromSupabase();
-    if (result.success) {
-        await loadTasks();
-    }
-};
-
+// ─── Handlers de UI ───────────────────────────────────────────────────────────
 const handleOpenAuth = (mode = "login") => {
     authModalMode.value = mode;
     showAuthModal.value = true;
 };
 
 const handleSignOut = async () => {
-    await signOut();
+    await authStore.signOut();
 };
 
 const handleSyncNow = async () => {
-    await manualSync();
+    await syncStore.manualSync();
 };
 
 const handleSelectTask = (task) => {
-    loadTask(task);
+    promptStore.loadTask(task);
 };
 
+// ─── Layout computed ──────────────────────────────────────────────────────────
 const showConfig = computed(
     () => !isMobile.value || activeView.value === "config",
 );
@@ -107,10 +86,10 @@ const showPreview = computed(
 <template>
     <div class="app-container">
         <Header
-            :is-dark="isDark"
+            :is-dark="themeStore.isDark"
             :is-mobile="isMobile"
-            @toggle-theme="toggleTheme"
-            :user="user"
+            @toggle-theme="themeStore.toggleTheme"
+            :user="authStore.user"
             @open-auth="handleOpenAuth"
             @sign-out="handleSignOut"
             @show-tasks="showTasks = true"
@@ -120,22 +99,22 @@ const showPreview = computed(
         <div class="app-wrapper">
             <ConfigPanel
                 v-show="showConfig"
-                :current-task="currentTask"
-                :all-tasks="tasks"
+                :current-task="promptStore.currentTask"
+                :all-tasks="promptStore.tasks"
                 :is-mobile="isMobile"
-                :media-list="mediaList"
+                :media-list="promptStore.mediaList"
                 :show-album="showAlbum"
-                @update-task-name="updateTaskName"
+                @update-task-name="promptStore.updateTaskName"
                 @show-tasks="showTasks = true"
                 @show-album="showAlbum = true"
-                @export-tasks="exportTasks"
+                @export-tasks="promptStore.exportTasks"
             />
 
             <PreviewPanel
                 v-show="showPreview"
-                :prompt-text="promptText"
+                :prompt-text="promptStore.promptText"
                 :is-mobile="isMobile"
-                @update-prompt="promptText = $event"
+                @update-prompt="promptStore.promptText = $event"
             />
 
             <MobileTabBar
@@ -146,30 +125,27 @@ const showPreview = computed(
 
             <TasksPanel
                 v-if="showTasks"
-                :tasks="tasks"
-                :current-task="currentTask"
+                :tasks="promptStore.tasks"
+                :current-task="promptStore.currentTask"
                 @close="showTasks = false"
-                @load-task="loadTask"
-                @create-task="createNewTask"
-                @delete-task="deleteTask"
-                @delete-all-tasks="deleteAllTasks"
-                @duplicate-task="duplicateTask"
+                @load-task="promptStore.loadTask"
+                @create-task="promptStore.createNewTask"
+                @delete-task="promptStore.deleteTask"
+                @delete-all-tasks="promptStore.deleteAllTasks"
+                @duplicate-task="promptStore.duplicateTask"
             />
 
-            <!-- Auth Modal -->
             <AuthModal
                 v-if="showAuthModal"
                 :is-open="showAuthModal"
                 :mode="authModalMode"
                 @close="showAuthModal = false"
-                @success="handleAuthSuccess"
             />
 
-            <!-- Album Modal -->
             <AlbumModal
                 v-if="showAlbum"
                 :is-open="showAlbum"
-                :tasks="tasks"
+                :tasks="promptStore.tasks"
                 @close="showAlbum = false"
                 @select-task="handleSelectTask"
             />
@@ -197,7 +173,6 @@ const showPreview = computed(
     overflow: hidden;
 }
 
-/* Mobile adjustments */
 @media (max-width: 1024px) {
     .app-wrapper {
         flex-direction: column;

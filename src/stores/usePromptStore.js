@@ -1,114 +1,91 @@
-import { ref, watch, onMounted, onUnmounted } from "vue";
+import { defineStore } from "pinia";
+import { ref, watch } from "vue";
 import { db, Task, initDB, normalizeTask } from "../db/db";
 import { supabase } from "../supabase/supabaseClient";
 
-// ─── Estado singleton de módulo ───────────────────────────────────────────────
+export const usePromptStore = defineStore("prompt", () => {
+  // ─── Estado ───────────────────────────────────────────────────────────────
+  const tasks = ref([]);
+  const currentTask = ref(null);
+  const promptText = ref("");
 
-const tasks = ref([]);
-const currentTask = ref(null);
-const promptText = ref("");
+  // Array de slots de media para la tarea activa.
+  // Cada slot: { url_post: string, url_video: string }
+  // Siempre tiene al menos un elemento.
+  const mediaList = ref([{ url_post: "", url_video: "" }]);
 
-// Array de slots de media para la tarea activa.
-// Cada slot: { url_post: string, url_video: string }
-// Siempre tiene al menos un elemento (el slot por defecto).
-const mediaList = ref([{ url_post: "", url_video: "" }]);
+  let saveTimeout = null;
 
-let initialized = false;
-let saveTimeout = null;
+  // ─── Helpers internos ─────────────────────────────────────────────────────
 
-// ─── Helpers internos ────────────────────────────────────────────────────────
+  /** Serializa mediaList a objeto plano seguro para Dexie (sin Proxies Vue) */
+  const serializeMedia = () =>
+    mediaList.value.map((m) => ({
+      url_post: m.url_post || "",
+      url_video: m.url_video || "",
+    }));
 
-/** Serializa mediaList a objeto plano seguro para Dexie (sin Proxies Vue) */
-const serializeMedia = () =>
-  mediaList.value.map((m) => ({
-    url_post: m.url_post || "",
-    url_video: m.url_video || "",
-  }));
-
-/** Devuelve el nombre de la tabla según si hay sesión activa o no */
-const getTable = async () => {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session ? "tasks_auth" : "tasks_local";
-};
-
-/**
- * Construye el objeto plano que se persiste en Dexie.
- * Usa JSON.parse/stringify para eliminar Proxies de Vue.
- */
-const buildTaskPayload = (task, media) =>
-  JSON.parse(
-    JSON.stringify({
-      id: task.id,
-      name: task.name,
-      prompt: task.prompt,
-      media,
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-    }),
-  );
-
-/**
- * Persiste currentTask con los valores actuales de promptText y mediaList,
- * y sincroniza el array tasks[] en memoria.
- */
-const persistCurrentTask = async () => {
-  if (!currentTask.value) return;
-
-  const tableName = await getTable();
-  const media = serializeMedia();
-
-  currentTask.value.prompt = promptText.value;
-  currentTask.value.media = media;
-  currentTask.value.updatedAt = Date.now();
-
-  const payload = buildTaskPayload(currentTask.value, media);
-  await db[tableName].put(payload);
-
-  const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
-  if (index !== -1) tasks.value[index] = { ...currentTask.value };
-};
-
-// ─── Watchers de auto-guardado ────────────────────────────────────────────────
-// Se registran a nivel de módulo (una sola vez, fuera de cualquier onMounted)
-// para que no estén vinculados al ciclo de vida de ningún componente.
-//
-// Si estuvieran dentro de onMounted, morirían cuando el primer componente
-// que los registró se desmonte, dejando el auto-guardado inactivo para el resto.
-//
-// Llamamos a persistCurrentTask (nivel módulo) en lugar de saveCurrentTask
-// (nivel composable) porque los watch() se definen antes de que el composable
-// sea instanciado y saveCurrentTask no existe aún en este scope.
-
-const scheduleSave = () => {
-  if (!currentTask.value) return;
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(persistCurrentTask, 500);
-};
-
-watch(promptText, scheduleSave);
-watch(mediaList, scheduleSave, { deep: true });
-
-// ─── Composable ──────────────────────────────────────────────────────────────
-
-export function usePromptManager() {
-  const clearLocalData = async () => {
-    try {
-      await db.tasks_auth.clear();
-      tasks.value = [];
-      currentTask.value = null;
-      promptText.value = "";
-      mediaList.value = [{ url_post: "", url_video: "" }];
-    } catch (error) {
-      console.error("Error limpiando datos de sesión:", error);
-    }
+  /** Devuelve el nombre de la tabla según si hay sesión activa o no */
+  const getTable = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    return session ? "tasks_auth" : "tasks_local";
   };
 
-  onMounted(async () => {
-    if (initialized) return;
-    initialized = true;
+  /**
+   * Construye el objeto plano que se persiste en Dexie.
+   * Usa JSON.parse/stringify para eliminar Proxies de Vue.
+   */
+  const buildTaskPayload = (task, media) =>
+    JSON.parse(
+      JSON.stringify({
+        id: task.id,
+        name: task.name,
+        prompt: task.prompt,
+        media,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      }),
+    );
 
+  /**
+   * Persiste currentTask con los valores actuales de promptText y mediaList,
+   * y sincroniza el array tasks[] en memoria.
+   */
+  const persistCurrentTask = async () => {
+    if (!currentTask.value) return;
+
+    const tableName = await getTable();
+    const media = serializeMedia();
+
+    currentTask.value.prompt = promptText.value;
+    currentTask.value.media = media;
+    currentTask.value.updatedAt = Date.now();
+
+    const payload = buildTaskPayload(currentTask.value, media);
+    await db[tableName].put(payload);
+
+    const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
+    if (index !== -1) tasks.value[index] = { ...currentTask.value };
+  };
+
+  // ─── Auto-guardado ────────────────────────────────────────────────────────
+  // Los watchers van dentro del store. Pinia los registra correctamente
+  // y los mantiene activos mientras el store exista (toda la vida de la app).
+
+  const scheduleSave = () => {
+    if (!currentTask.value) return;
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(persistCurrentTask, 500);
+  };
+
+  watch(promptText, scheduleSave);
+  watch(mediaList, scheduleSave, { deep: true });
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
+
+  const init = async () => {
     await initDB();
 
     const {
@@ -121,7 +98,19 @@ export function usePromptManager() {
     window.addEventListener("user-signed-out", clearLocalData);
     window.addEventListener("data-restored", reloadTasks);
     window.addEventListener("create-default-task", createNewTask);
-  });
+  };
+
+  const clearLocalData = async () => {
+    try {
+      await db.tasks_auth.clear();
+      tasks.value = [];
+      currentTask.value = null;
+      promptText.value = "";
+      mediaList.value = [{ url_post: "", url_video: "" }];
+    } catch (error) {
+      console.error("Error limpiando datos de sesión:", error);
+    }
+  };
 
   const loadTasks = async (skipIfEmpty = false) => {
     try {
@@ -146,7 +135,6 @@ export function usePromptManager() {
         .reverse()
         .toArray();
 
-      // Normalizar al vuelo por si hay tareas en formato v2 sin migración
       tasks.value = allTasks.map(normalizeTask);
 
       if (tasks.value.length > 0) {
@@ -181,11 +169,9 @@ export function usePromptManager() {
     const normalized = normalizeTask(task);
     currentTask.value = normalized;
     promptText.value = normalized.prompt;
-    // Copia profunda para evitar mutar directamente el objeto en tasks[]
     mediaList.value = normalized.media.map((m) => ({ ...m }));
   };
 
-  /** Guarda el estado actual de promptText y mediaList en la tarea activa */
   const saveCurrentTask = async () => {
     try {
       await persistCurrentTask();
@@ -328,7 +314,6 @@ export function usePromptManager() {
 
   // ─── Gestión de slots de media ────────────────────────────────────────────
 
-  /** Actualiza un slot específico. Llamado por VideoPreview al extraer un video. */
   const updateMediaSlot = async (index, { url_post, url_video }) => {
     if (index < 0 || index >= mediaList.value.length) return;
     mediaList.value[index] = { url_post, url_video };
@@ -336,24 +321,17 @@ export function usePromptManager() {
     saveTimeout = setTimeout(saveCurrentTask, 500);
   };
 
-  /** Agrega un slot vacío al final y guarda de inmediato. */
   const addMediaSlot = async () => {
     mediaList.value.push({ url_post: "", url_video: "" });
     await saveCurrentTask();
   };
 
-  /** Elimina el slot en el índice dado. Protegido: nunca borra si solo queda uno. */
   const removeMediaSlot = async (index) => {
     if (mediaList.value.length <= 1) return;
     mediaList.value.splice(index, 1);
     await saveCurrentTask();
   };
 
-  /**
-   * Actualiza la url_video de un slot específico de cualquier tarea.
-   * Usado por AlbumModal para upgrade a HD.
-   * mediaIndex: índice del slot a actualizar (default 0).
-   */
   const updateTaskVideoUrl = async (taskId, url_video, mediaIndex = 0) => {
     try {
       const tableName = await getTable();
@@ -378,7 +356,6 @@ export function usePromptManager() {
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) tasks.value[index] = normalizedTask;
 
-      // Si es la tarea activa, reflejar el cambio en mediaList
       if (currentTask.value?.id === taskId && mediaList.value[mediaIndex]) {
         mediaList.value[mediaIndex] = {
           ...mediaList.value[mediaIndex],
@@ -394,20 +371,24 @@ export function usePromptManager() {
     await loadTasks();
   };
 
-  onUnmounted(() => {
+  const cleanup = () => {
     window.removeEventListener("user-signed-out", clearLocalData);
     window.removeEventListener("data-restored", reloadTasks);
     window.removeEventListener("create-default-task", createNewTask);
-  });
+  };
 
   return {
+    // Estado
     tasks,
     currentTask,
     promptText,
     mediaList,
+    // Actions
+    init,
+    clearLocalData,
+    loadTasks,
     createNewTask,
     loadTask,
-    loadTasks,
     saveCurrentTask,
     updateTaskName,
     deleteTask,
@@ -419,7 +400,7 @@ export function usePromptManager() {
     addMediaSlot,
     removeMediaSlot,
     updateTaskVideoUrl,
-    clearLocalData,
     reloadTasks,
+    cleanup,
   };
-}
+});

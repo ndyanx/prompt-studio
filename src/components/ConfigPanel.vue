@@ -1,7 +1,7 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch, nextTick } from "vue";
 import VideoPreview from "./VideoPreview.vue";
-import { usePromptManager } from "../composables/usePromptManager";
+import { usePromptStore } from "../stores/usePromptStore";
 
 const props = defineProps({
     currentTask: Object,
@@ -18,11 +18,48 @@ const emit = defineEmits([
     "show-album",
 ]);
 
+const promptStore = usePromptStore();
 const { importTasks, updateMediaSlot, addMediaSlot, removeMediaSlot } =
-    usePromptManager();
+    promptStore;
 
-const confirmDelete = ref(null); // index del slot a eliminar, null = cerrado
+const confirmDelete = ref(null);
 const confirmInput = ref("");
+
+// ─── Auto-resize del textarea ─────────────────────────────────────────────────
+// El textarea crece verticalmente según su contenido.
+// La técnica: se resetea la altura a 'auto' para que el scrollHeight sea real,
+// luego se aplica ese scrollHeight como altura definitiva.
+const nameTextarea = ref(null);
+
+const resizeTextarea = () => {
+    const el = nameTextarea.value;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+};
+
+// Cuando cambia la tarea activa, recalcular la altura
+watch(
+    () => props.currentTask?.name,
+    async () => {
+        await nextTick();
+        resizeTextarea();
+    },
+    { immediate: true },
+);
+
+const handleNameInput = (e) => {
+    emit("update-task-name", e.target.value);
+    resizeTextarea();
+};
+
+// Evitar saltos de línea con Enter — solo confirma/desenfoca
+const handleNameKeydown = (e) => {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        e.target.blur();
+    }
+};
 
 const requestRemoveSlot = (index) => {
     confirmDelete.value = index;
@@ -85,17 +122,116 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     <main class="config-side" :class="{ mobile: isMobile }">
         <header class="main-header">
             <div class="header-content">
-                <div class="title-section">
+                <!-- Fila superior: badge + botones de acción -->
+                <div class="header-top">
                     <span class="badge">Dynamic Prompt Editor</span>
+                    <div class="header-actions">
+                        <button
+                            class="action-btn"
+                            @click="emit('show-tasks')"
+                            title="Ver tareas"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"
+                                />
+                            </svg>
+                            <span v-if="!isMobile">Tareas</span>
+                        </button>
+                        <button
+                            class="action-btn"
+                            @click="emit('export-tasks')"
+                            title="Exportar tareas"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+                                />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                            <span v-if="!isMobile">Exportar</span>
+                        </button>
+                        <button
+                            class="action-btn"
+                            @click="handleImport"
+                            title="Importar tareas"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+                                />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            <span v-if="!isMobile">Importar</span>
+                        </button>
+                        <button
+                            class="action-btn album-btn"
+                            @click="emit('show-album')"
+                            title="Ver álbum de videos"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <polygon points="23 7 16 12 23 17 23 7" />
+                                <rect
+                                    x="1"
+                                    y="5"
+                                    width="15"
+                                    height="14"
+                                    rx="2"
+                                    ry="2"
+                                />
+                            </svg>
+                            <span v-if="!isMobile">Álbum</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Fila inferior: nombre completo con crecimiento vertical -->
+                <div class="title-section">
                     <div class="task-name-wrapper">
-                        <input
+                        <textarea
                             v-if="currentTask"
+                            ref="nameTextarea"
                             :value="currentTask.name"
-                            @input="
-                                emit('update-task-name', $event.target.value)
-                            "
+                            @input="handleNameInput"
+                            @keydown="handleNameKeydown"
                             class="task-name-input"
                             placeholder="Nombre de la tarea"
+                            rows="1"
+                            spellcheck="false"
                         />
                         <span
                             v-if="hasDuplicates"
@@ -120,105 +256,10 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                             ×{{ duplicateCount }}
                         </span>
                     </div>
+
                     <p v-if="hasDuplicates" class="duplicate-message">
                         Ya existen {{ duplicateCount }} tareas con este nombre
                     </p>
-                </div>
-
-                <div class="header-actions">
-                    <button
-                        class="action-btn"
-                        @click="emit('show-tasks')"
-                        title="Ver tareas"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path
-                                d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"
-                            />
-                        </svg>
-                        <span v-if="!isMobile">Tareas</span>
-                    </button>
-
-                    <button
-                        class="action-btn"
-                        @click="emit('export-tasks')"
-                        title="Exportar tareas"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path
-                                d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                            />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        <span v-if="!isMobile">Exportar</span>
-                    </button>
-
-                    <button
-                        class="action-btn"
-                        @click="handleImport"
-                        title="Importar tareas"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <path
-                                d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                            />
-                            <polyline points="17 8 12 3 7 8" />
-                            <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        <span v-if="!isMobile">Importar</span>
-                    </button>
-
-                    <button
-                        class="action-btn album-btn"
-                        @click="emit('show-album')"
-                        title="Ver álbum de videos"
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="18"
-                            height="18"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                        >
-                            <polygon points="23 7 16 12 23 17 23 7" />
-                            <rect
-                                x="1"
-                                y="5"
-                                width="15"
-                                height="14"
-                                rx="2"
-                                ry="2"
-                            />
-                        </svg>
-                        <span v-if="!isMobile">Álbum</span>
-                    </button>
                 </div>
             </div>
         </header>
@@ -230,7 +271,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 :key="index"
                 class="media-slot"
             >
-                <!-- Cabecera del slot: solo visible cuando hay más de uno -->
                 <div v-if="mediaList.length > 1" class="slot-header">
                     <span class="slot-label">Post {{ index + 1 }}</span>
                     <button
@@ -253,7 +293,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                         </svg>
                     </button>
                 </div>
-
                 <VideoPreview
                     :url-post="slot.url_post"
                     :url-video="slot.url_video"
@@ -262,7 +301,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 />
             </div>
 
-            <!-- Agregar nuevo slot -->
             <button class="add-slot-btn" @click="addMediaSlot">
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -345,18 +383,21 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 
 .main-header {
     flex-shrink: 0;
+    margin-bottom: 24px;
 }
 
 .header-content {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 20px;
+    flex-direction: column;
+    gap: 12px;
 }
 
-.title-section {
-    flex: 1;
-    min-width: 0;
+/* Fila superior: badge a la izquierda, botones a la derecha */
+.header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
 }
 
 .badge {
@@ -364,17 +405,57 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     font-weight: 700;
     color: var(--accent);
     letter-spacing: 1px;
-    display: block;
-    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.action-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition:
+        background 0.2s,
+        color 0.2s,
+        border-color 0.2s;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.action-btn:hover {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+}
+
+/* Fila inferior: nombre ocupa todo el ancho y crece hacia abajo */
+.title-section {
+    min-width: 0;
 }
 
 .task-name-wrapper {
     display: flex;
-    align-items: center;
+    align-items: flex-start; /* flex-start para que el badge de duplicado
+                                  se alinee arriba cuando el nombre tiene varias líneas */
     gap: 8px;
-    position: relative;
 }
 
+/* ─── Textarea auto-resize ────────────────────────────────────────────────────
+   overflow:hidden es clave: evita que aparezca scrollbar vertical
+   y fuerza a que scrollHeight sea el alto real del contenido.
+   resize:none elimina el handle de arrastre.
+   Los estilos de fuente imitan el input original.               */
 .task-name-input {
     font-size: 28px;
     font-weight: 600;
@@ -386,12 +467,20 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     padding: 4px 0;
     border-bottom: 2px solid transparent;
     transition: border-color 0.2s;
-    flex: 1;
-    min-width: 0;
+    font-family: inherit;
+    line-height: 1.3;
+    resize: none; /* sin handle de redimensión */
+    overflow: hidden; /* necesario para que scrollHeight sea exacto */
+    display: block;
 }
 
 .task-name-input:focus {
     border-bottom-color: var(--accent);
+}
+
+.task-name-input::placeholder {
+    color: var(--text-secondary);
+    font-weight: 400;
 }
 
 .duplicate-warning {
@@ -407,6 +496,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border: 1px solid rgba(255, 149, 0, 0.3);
     flex-shrink: 0;
     cursor: help;
+    margin-top: 6px; /* alineado verticalmente con la primera línea del nombre */
     transition:
         background 0.2s,
         border-color 0.2s;
@@ -447,43 +537,11 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     }
 }
 
-.header-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-}
-
-.action-btn {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    padding: 8px 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition:
-        background 0.2s,
-        color 0.2s,
-        border-color 0.2s;
-    color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.action-btn:hover {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
-}
-
 /* Media list */
 .media-list {
     display: flex;
     flex-direction: column;
 }
-
 .media-slot {
     display: flex;
     flex-direction: column;
@@ -574,6 +632,10 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     .duplicate-message {
         font-size: 11px;
     }
+    .header-top {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
 }
 
 .mobile-spacer {
@@ -587,6 +649,8 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         min-height: 100px;
     }
 }
+
+/* Modal */
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -674,7 +738,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     background: #ff3b30;
     color: white;
     border-color: #ff3b30;
-    transition: all 0.2s;
 }
 
 .modal-btn.confirm:hover:not(:disabled) {

@@ -1,11 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import VideoPreview from "./VideoPreview.vue";
-import { usePromptManager } from "../composables/usePromptManager";
+import { usePromptStore } from "../stores/usePromptStore";
 
 const VITE_PROXY_API = import.meta.env.VITE_PROXY_API;
 
-const { updateTaskVideoUrl } = usePromptManager();
+// Solo necesitamos una función del store, no hace falta storeToRefs
+const promptStore = usePromptStore();
 
 const props = defineProps({
     tasks: Array,
@@ -23,23 +24,13 @@ const isRandomizing = ref(false);
 const cooldownSeconds = ref(0);
 let cooldownInterval = null;
 
-// Cache para evitar refiltrar el array completo en cada render
 const tasksWithVideoCache = ref([]);
 const lastTasksLength = ref(0);
-
-// Cache para no repetir llamadas a la API por la misma URL
 const hdCheckCache = new Map();
 
-// Consulta la API para obtener la versión HD del video si existe.
-// Actualiza la tarea en DB y el cache para evitar consultas repetidas.
 const checkAndUpgradeToHD = async (url, task, urlPost) => {
-    if (!url || url.includes("_hd.mp4")) {
-        return url;
-    }
-
-    if (hdCheckCache.has(url)) {
-        return hdCheckCache.get(url);
-    }
+    if (!url || url.includes("_hd.mp4")) return url;
+    if (hdCheckCache.has(url)) return hdCheckCache.get(url);
 
     const postUrl = urlPost || "";
     if (!postUrl.trim()) {
@@ -49,41 +40,32 @@ const checkAndUpgradeToHD = async (url, task, urlPost) => {
 
     try {
         const postIdMatch = postUrl.match(/\/post\/([a-f0-9-]+)/i);
-
         if (!postIdMatch || !postIdMatch[1]) {
             hdCheckCache.set(url, url);
             return url;
         }
 
         const postId = postIdMatch[1];
-
         const payload = {
             url: "https://grok.com/rest/media/post/get",
             method: "POST",
             impersonate: "chrome136",
-            json: {
-                id: postId,
-            },
+            json: { id: postId },
         };
 
         const response = await fetch(VITE_PROXY_API, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
         });
 
-        if (!response.ok) {
-            throw new Error("Error al obtener datos del post");
-        }
+        if (!response.ok) throw new Error("Error al obtener datos del post");
 
         const responseData = await response.json();
         const data = JSON.parse(responseData.data);
 
-        if (!data || !data.post) {
+        if (!data || !data.post)
             throw new Error("Respuesta inválida del servidor");
-        }
 
         const post = data.post;
 
@@ -94,11 +76,10 @@ const checkAndUpgradeToHD = async (url, task, urlPost) => {
 
         if (post.hdMediaUrl) {
             hdCheckCache.set(url, post.hdMediaUrl);
-            // Actualizar el slot correcto: buscar por url_video coincidente
             const mediaIndex = (task.media || []).findIndex(
                 (m) => m.url_video === url,
             );
-            await updateTaskVideoUrl(
+            await promptStore.updateTaskVideoUrl(
                 task.id,
                 post.hdMediaUrl,
                 mediaIndex >= 0 ? mediaIndex : 0,
@@ -115,8 +96,6 @@ const checkAndUpgradeToHD = async (url, task, urlPost) => {
     }
 };
 
-// Filtra las tareas que tienen video. Usa cache por longitud para evitar
-// refiltrar cuando el array no ha cambiado.
 const tasksWithVideo = computed(() => {
     if (
         props.tasks.length === lastTasksLength.value &&
@@ -125,10 +104,8 @@ const tasksWithVideo = computed(() => {
         return tasksWithVideoCache.value;
     }
 
-    // Normalizar y filtrar tareas que tengan al menos un slot con video
     const filtered = props.tasks
         .map((task) => {
-            // Compatibilidad con formato viejo {url_post, url_video}
             if (!Array.isArray(task.media)) {
                 return {
                     ...task,
@@ -157,7 +134,6 @@ const currentTask = computed(() => {
     const task = tasksWithVideo.value[currentTaskIndex.value];
     if (!task) return null;
 
-    // Elegir al azar uno de los slots con video de esta tarea
     const validSlots = task.media.filter(
         (m) => m.url_video && m.url_video.trim() !== "",
     );
@@ -169,12 +145,10 @@ const currentTask = computed(() => {
 
 const getRandomNextIndex = () => {
     if (tasksWithVideo.value.length <= 1) return null;
-
     let newIndex;
     do {
         newIndex = Math.floor(Math.random() * tasksWithVideo.value.length);
     } while (newIndex === currentTaskIndex.value);
-
     return newIndex;
 };
 
@@ -203,7 +177,6 @@ const preloadNextVideo = async () => {
         preloadElement.value.preload = "metadata";
         preloadElement.value.style.display = "none";
     }
-
     preloadElement.value.src = videoUrl;
 };
 
@@ -235,7 +208,6 @@ const randomizeTask = () => {
 
     cooldownInterval = setInterval(() => {
         cooldownSeconds.value--;
-
         if (cooldownSeconds.value <= 0) {
             clearInterval(cooldownInterval);
             isRandomizing.value = false;
@@ -251,25 +223,17 @@ const selectCurrentTask = () => {
     }
 };
 
-const closeModal = () => {
-    emit("close");
-};
+const closeModal = () => emit("close");
 
 const handleKeydown = (e) => {
-    if (e.key === "Escape") {
-        closeModal();
-    }
+    if (e.key === "Escape") closeModal();
 };
 
-// Precarga el siguiente video 2 segundos después de que cambia el actual,
-// para que el usuario no espere al siguiente cambio.
 watch(
     currentTaskIndex,
     async () => {
         await nextTick();
-        setTimeout(() => {
-            preloadNextVideo();
-        }, 2000);
+        setTimeout(() => preloadNextVideo(), 2000);
     },
     { immediate: false },
 );
@@ -283,11 +247,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     window.removeEventListener("keydown", handleKeydown);
-
-    if (cooldownInterval) {
-        clearInterval(cooldownInterval);
-    }
-
+    if (cooldownInterval) clearInterval(cooldownInterval);
     if (preloadElement.value) {
         preloadElement.value.src = "";
         preloadElement.value = null;

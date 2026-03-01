@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed } from "vue";
+import { storeToRefs } from "pinia";
 import SyncStatus from "./SyncStatus.vue";
-import { useSyncManager } from "../composables/useSyncManager";
+import { useSyncStore } from "../stores/useSyncStore";
 
 const props = defineProps({
     isDark: Boolean,
@@ -18,6 +19,7 @@ const emit = defineEmits([
 
 const showSidebar = ref(false);
 
+const syncStore = useSyncStore();
 const {
     lastSyncTime,
     isSyncingNow,
@@ -26,8 +28,7 @@ const {
     isOffline,
     isThrottled,
     throttleSecondsRemaining,
-    manualSync,
-} = useSyncManager();
+} = storeToRefs(syncStore);
 
 const formatSyncTime = computed(() => {
     if (!lastSyncTime.value) return "Nunca";
