@@ -2,13 +2,13 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import ConfigPanel from "./components/ConfigPanel.vue";
 import PreviewPanel from "./components/PreviewPanel.vue";
+import GalleryPanel from "./components/GalleryPanel.vue";
 import Header from "./components/Header.vue";
 import TasksPanel from "./components/TasksPanel.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
 import AuthModal from "./components/AuthModal.vue";
 import AlbumModal from "./components/AlbumModal.vue";
 
-// ─── Stores (reemplazan los composables) ──────────────────────────────────────
 import { useThemeStore } from "./stores/useThemeStore";
 import { useAuthStore } from "./stores/useAuthStore";
 import { useSyncStore } from "./stores/useSyncStore";
@@ -19,11 +19,12 @@ const authStore = useAuthStore();
 const syncStore = useSyncStore();
 const promptStore = usePromptStore();
 
-// ─── Estado local de UI (solo vive en este componente) ────────────────────────
+// ─── Estado local de UI ───────────────────────────────────────────────────
 const showTasks = ref(false);
 const showAlbum = ref(false);
 const isMobile = ref(false);
-const activeView = ref("config");
+const activeView = ref("config"); // "config" | "preview" (mobile)
+const activeMainView = ref("studio"); // "studio" | "gallery"
 const showAuthModal = ref(false);
 const authModalMode = ref("login");
 
@@ -48,7 +49,6 @@ onUnmounted(() => {
     clearTimeout(resizeTimeout);
 });
 
-// Cerrar modal cuando el usuario se autentica correctamente
 watch(
     () => authStore.isAuthenticated,
     (newVal) => {
@@ -56,7 +56,7 @@ watch(
     },
 );
 
-// ─── Handlers de UI ───────────────────────────────────────────────────────────
+// ─── Handlers de UI ──────────────────────────────────────────────────────
 const handleOpenAuth = (mode = "login") => {
     authModalMode.value = mode;
     showAuthModal.value = true;
@@ -74,12 +74,31 @@ const handleSelectTask = (task) => {
     promptStore.loadTask(task);
 };
 
-// ─── Layout computed ──────────────────────────────────────────────────────────
+const toggleMainView = () => {
+    activeMainView.value =
+        activeMainView.value === "studio" ? "gallery" : "studio";
+};
+
+/**
+ * Llamado desde GalleryPanel cuando el usuario quiere ir a una tarea.
+ * Carga la tarea, cambia a studio y en mobile va a config.
+ */
+const handleGoToTask = (taskId) => {
+    const task = promptStore.tasks.find((t) => t.id === taskId);
+    if (task) promptStore.loadTask(task);
+    activeMainView.value = "studio";
+    activeView.value = "config";
+};
+
+// ─── Layout computed ──────────────────────────────────────────────────────
+const isStudio = computed(() => activeMainView.value === "studio");
+const isGallery = computed(() => activeMainView.value === "gallery");
+
 const showConfig = computed(
-    () => !isMobile.value || activeView.value === "config",
+    () => isStudio.value && (!isMobile.value || activeView.value === "config"),
 );
 const showPreview = computed(
-    () => !isMobile.value || activeView.value === "preview",
+    () => isStudio.value && (!isMobile.value || activeView.value === "preview"),
 );
 </script>
 
@@ -88,7 +107,9 @@ const showPreview = computed(
         <Header
             :is-dark="themeStore.isDark"
             :is-mobile="isMobile"
+            :active-main-view="activeMainView"
             @toggle-theme="themeStore.toggleTheme"
+            @toggle-gallery="toggleMainView"
             :user="authStore.user"
             @open-auth="handleOpenAuth"
             @sign-out="handleSignOut"
@@ -97,6 +118,7 @@ const showPreview = computed(
         />
 
         <div class="app-wrapper">
+            <!-- Vista Studio -->
             <ConfigPanel
                 v-show="showConfig"
                 :current-task="promptStore.currentTask"
@@ -117,8 +139,16 @@ const showPreview = computed(
                 @update-prompt="promptStore.promptText = $event"
             />
 
+            <!-- Vista Gallery -->
+            <GalleryPanel
+                v-show="isGallery"
+                :tasks="promptStore.tasks"
+                @go-to-task="handleGoToTask"
+            />
+
+            <!-- Tab bar mobile: solo en studio -->
             <MobileTabBar
-                v-if="isMobile"
+                v-if="isMobile && isStudio"
                 :active-view="activeView"
                 @change-view="activeView = $event"
             />

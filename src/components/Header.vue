@@ -8,6 +8,10 @@ const props = defineProps({
     isDark: Boolean,
     isMobile: Boolean,
     user: Object,
+    activeMainView: {
+        type: String,
+        default: "studio",
+    },
 });
 
 const emit = defineEmits([
@@ -15,6 +19,7 @@ const emit = defineEmits([
     "open-auth",
     "sign-out",
     "show-tasks",
+    "toggle-gallery",
 ]);
 
 const showSidebar = ref(false);
@@ -108,6 +113,53 @@ const handleUserAction = () => {
         <div class="header-right">
             <!-- Desktop: Mostrar estado de sync y usuario -->
             <div v-if="!isMobile" class="header-actions">
+                <!-- Gallery Toggle -->
+                <button
+                    class="gallery-toggle-btn"
+                    :class="{ active: activeMainView === 'gallery' }"
+                    @click="emit('toggle-gallery')"
+                    :title="
+                        activeMainView === 'gallery'
+                            ? 'Volver al Studio'
+                            : 'Ver Galería'
+                    "
+                >
+                    <svg
+                        v-if="activeMainView !== 'gallery'"
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <rect x="3" y="3" width="7" height="7" rx="1" />
+                        <rect x="14" y="3" width="7" height="7" rx="1" />
+                        <rect x="3" y="14" width="7" height="7" rx="1" />
+                        <rect x="14" y="14" width="7" height="7" rx="1" />
+                    </svg>
+                    <svg
+                        v-else
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <path
+                            d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
+                        />
+                    </svg>
+                    <span class="gallery-btn-label">
+                        {{
+                            activeMainView === "gallery" ? "Studio" : "Galería"
+                        }}
+                    </span>
+                </button>
+
                 <!-- Sync Status Component -->
                 <SyncStatus />
 
@@ -272,6 +324,65 @@ const handleUserAction = () => {
                     </div>
 
                     <div class="sidebar-content">
+                        <!-- Galería toggle mobile -->
+                        <div class="sidebar-item">
+                            <span class="sidebar-label">Vista</span>
+                            <button
+                                class="gallery-toggle-btn"
+                                :class="{
+                                    active: activeMainView === 'gallery',
+                                }"
+                                @click="
+                                    emit('toggle-gallery');
+                                    showSidebar = false;
+                                "
+                            >
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <rect
+                                        x="3"
+                                        y="3"
+                                        width="7"
+                                        height="7"
+                                        rx="1"
+                                    />
+                                    <rect
+                                        x="14"
+                                        y="3"
+                                        width="7"
+                                        height="7"
+                                        rx="1"
+                                    />
+                                    <rect
+                                        x="3"
+                                        y="14"
+                                        width="7"
+                                        height="7"
+                                        rx="1"
+                                    />
+                                    <rect
+                                        x="14"
+                                        y="14"
+                                        width="7"
+                                        height="7"
+                                        rx="1"
+                                    />
+                                </svg>
+                                {{
+                                    activeMainView === "gallery"
+                                        ? "Volver al Studio"
+                                        : "Ver Galería"
+                                }}
+                            </button>
+                        </div>
+
                         <!-- Sección Usuario -->
                         <div class="sidebar-section">
                             <h3>Cuenta</h3>
@@ -1139,5 +1250,45 @@ const handleUserAction = () => {
         width: 24px;
         height: 24px;
     }
+}
+
+/* ─── Gallery Toggle Button ─────────────────────────────────────────────── */
+.gallery-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease;
+}
+
+.gallery-toggle-btn:hover {
+    background: var(--hover-bg);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.gallery-toggle-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.gallery-toggle-btn.active:hover {
+    background: var(--accent-hover);
+}
+
+.gallery-btn-label {
+    font-size: 13px;
 }
 </style>
