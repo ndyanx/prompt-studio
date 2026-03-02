@@ -141,7 +141,7 @@ const showPreview = computed(
 
             <!-- Vista Gallery -->
             <GalleryPanel
-                v-show="isGallery"
+                v-if="isGallery"
                 :tasks="promptStore.tasks"
                 @go-to-task="handleGoToTask"
             />

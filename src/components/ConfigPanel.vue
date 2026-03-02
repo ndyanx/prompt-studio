@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, ref, watch, onMounted, nextTick } from "vue";
 import VideoPreview from "./VideoPreview.vue";
 import { usePromptStore } from "../stores/usePromptStore";
 
@@ -25,32 +25,18 @@ const { importTasks, updateMediaSlot, addMediaSlot, removeMediaSlot } =
 const confirmDelete = ref(null);
 const confirmInput = ref("");
 
-// ─── Auto-resize del textarea ─────────────────────────────────────────────────
-// El textarea crece verticalmente según su contenido.
-// La técnica: se resetea la altura a 'auto' para que el scrollHeight sea real,
-// luego se aplica ese scrollHeight como altura definitiva.
-const nameTextarea = ref(null);
+// ─── ContentEditable para el nombre ──────────────────────────────────────
+// Usamos div[contenteditable] en lugar de textarea + auto-resize.
+// El textarea necesita resizeTextarea() en onMounted para calcular su altura
+// real via scrollHeight — eso causa un layout shift porque el elemento crece
+// DESPUÉS del primer render. Un contenteditable se expande con su contenido
+// de forma nativa, sin JS, eliminando el shift completamente.
 
-const resizeTextarea = () => {
-    const el = nameTextarea.value;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-};
-
-// Cuando cambia la tarea activa, recalcular la altura
-watch(
-    () => props.currentTask?.name,
-    async () => {
-        await nextTick();
-        resizeTextarea();
-    },
-    { immediate: true },
-);
+const nameEditable = ref(null);
 
 const handleNameInput = (e) => {
-    emit("update-task-name", e.target.value);
-    resizeTextarea();
+    // innerText da el texto plano sin HTML — seguro para el nombre
+    emit("update-task-name", e.target.innerText.replace(/\n/g, ""));
 };
 
 // Evitar saltos de línea con Enter — solo confirma/desenfoca
@@ -60,6 +46,23 @@ const handleNameKeydown = (e) => {
         e.target.blur();
     }
 };
+
+watch(
+    () => props.currentTask?.name,
+    async (newName) => {
+        await nextTick();
+        if (nameEditable.value && nameEditable.value.innerText !== newName) {
+            nameEditable.value.innerText = newName || "";
+        }
+    },
+    { immediate: true },
+);
+
+onMounted(() => {
+    if (nameEditable.value && props.currentTask?.name) {
+        nameEditable.value.innerText = props.currentTask.name;
+    }
+});
 
 const requestRemoveSlot = (index) => {
     confirmDelete.value = index;
@@ -222,16 +225,15 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 <!-- Fila inferior: nombre completo con crecimiento vertical -->
                 <div class="title-section">
                     <div class="task-name-wrapper">
-                        <textarea
+                        <div
                             v-if="currentTask"
-                            ref="nameTextarea"
-                            :value="currentTask.name"
+                            ref="nameEditable"
+                            contenteditable="true"
+                            class="task-name-input"
+                            :data-placeholder="'Nombre de la tarea'"
+                            spellcheck="false"
                             @input="handleNameInput"
                             @keydown="handleNameKeydown"
-                            class="task-name-input"
-                            placeholder="Nombre de la tarea"
-                            rows="1"
-                            spellcheck="false"
                         />
                         <span
                             v-if="hasDuplicates"
@@ -265,7 +267,13 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         </header>
 
         <!-- Lista de slots de media -->
-        <div v-if="!showAlbum && confirmDelete === null" class="media-list">
+        <div
+            v-show="!showAlbum"
+            class="media-list"
+            :style="{
+                visibility: confirmDelete !== null ? 'hidden' : 'visible',
+            }"
+        >
             <div
                 v-for="(slot, index) in mediaList"
                 :key="index"
@@ -372,7 +380,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     flex: 0 0 60%;
     display: flex;
     flex-direction: column;
-    padding: 40px;
+    padding: 40px 40px 64px;
     border-right: 1px solid var(--border-color);
     background: var(--bg-primary);
     overflow-y: auto;
@@ -453,11 +461,9 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     gap: 8px;
 }
 
-/* ─── Textarea auto-resize ────────────────────────────────────────────────────
-   overflow:hidden es clave: evita que aparezca scrollbar vertical
-   y fuerza a que scrollHeight sea el alto real del contenido.
-   resize:none elimina el handle de arrastre.
-   Los estilos de fuente imitan el input original.               */
+/* ─── ContentEditable nombre de tarea ────────────────────────────────────────
+   div[contenteditable] se expande con su contenido de forma nativa sin JS,
+   eliminando el layout shift que causaba el textarea + resizeTextarea(). */
 .task-name-input {
     font-size: 28px;
     font-weight: 600;
@@ -471,18 +477,21 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     transition: border-color 0.2s;
     font-family: inherit;
     line-height: 1.3;
-    resize: none; /* sin handle de redimensión */
-    overflow: hidden; /* necesario para que scrollHeight sea exacto */
-    display: block;
+    word-break: break-word;
+    white-space: pre-wrap;
+    cursor: text;
 }
 
 .task-name-input:focus {
     border-bottom-color: var(--accent);
+    outline: none;
 }
 
-.task-name-input::placeholder {
+.task-name-input:empty::before {
+    content: attr(data-placeholder);
     color: var(--text-secondary);
     font-weight: 400;
+    pointer-events: none;
 }
 
 .duplicate-warning {
@@ -543,6 +552,8 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 .media-list {
     display: flex;
     flex-direction: column;
+    min-height: 200px;
+    flex-shrink: 0;
 }
 .media-slot {
     display: flex;

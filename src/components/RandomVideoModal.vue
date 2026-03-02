@@ -141,7 +141,10 @@ const selectCurrentTask = () => {
     }
 };
 
-const closeModal = () => emit("close");
+const closeModal = () => {
+    window.dispatchEvent(new CustomEvent("random-modal-close"));
+    emit("close");
+};
 
 const handleKeydown = (e) => {
     if (e.key === "Escape") closeModal();
@@ -159,6 +162,7 @@ watch(
 onMounted(() => {
     if (props.isOpen && tasksWithVideo.value.length > 0) {
         randomizeTask();
+        window.dispatchEvent(new CustomEvent("random-modal-open"));
     }
     window.addEventListener("keydown", handleKeydown);
 });
@@ -281,7 +285,17 @@ onUnmounted(() => {
                             </div>
                         </div>
 
-                        <div class="modal-video-wrapper">
+                        <div
+                            class="modal-video-wrapper"
+                            :style="
+                                currentTask?._activeSlot?.width &&
+                                currentTask?._activeSlot?.height
+                                    ? {
+                                          aspectRatio: `${currentTask._activeSlot.width} / ${currentTask._activeSlot.height}`,
+                                      }
+                                    : {}
+                            "
+                        >
                             <video
                                 v-if="currentTask?._activeSlot?.url_video"
                                 :key="
@@ -327,6 +341,8 @@ onUnmounted(() => {
     max-width: min(92vw, 900px);
     max-height: 92vh;
     width: 100%;
+    /* contain:layout aísla el reflow sin colapsar la altura del contenedor */
+    contain: layout;
 }
 
 /* ─── Estado vacío ──────────────────────────────────────────────────────── */
@@ -442,14 +458,19 @@ onUnmounted(() => {
     background: #000;
     flex: 1;
     min-height: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    /*
+       aspect-ratio viene dinámico desde :style con las dimensiones reales del video.
+       Fallback: 16/9 para videos sin dimensiones guardadas aún.
+       El video absoluto llena el wrapper exacto → sin barras negras.
+    */
+    aspect-ratio: 16 / 9;
+    position: relative;
 }
 .modal-video {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    max-height: calc(80vh - 60px);
     object-fit: contain;
     display: block;
 }
@@ -493,10 +514,11 @@ onUnmounted(() => {
         padding: 12px;
     }
     .modal-content {
+        max-width: 100%;
         max-height: 95vh;
     }
-    .modal-video {
-        max-height: calc(95vh - 60px);
+    .modal-video-wrapper {
+        border-radius: 10px;
     }
     .modal-task-name {
         font-size: 13px;

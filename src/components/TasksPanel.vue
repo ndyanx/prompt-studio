@@ -542,24 +542,29 @@ const pageNumbers = computed(() => {
                         <option value="colors">Más colores</option>
                     </select>
 
-                    <button
-                        @click="openDeleteAllModal"
-                        class="delete-all-btn"
-                        title="Borrar todas las tareas"
-                        :disabled="tasks.length === 0"
-                    >
-                        <svg width="18" height="18">
-                            <use href="#icon-trash-lines" />
-                        </svg>
-                        Borrar todo
-                    </button>
+                    <div class="task-actions">
+                        <button
+                            @click="openDeleteAllModal"
+                            class="delete-all-btn"
+                            title="Borrar todas las tareas"
+                            :disabled="tasks.length === 0"
+                        >
+                            <svg width="18" height="18">
+                                <use href="#icon-trash-lines" />
+                            </svg>
+                            Borrar todo
+                        </button>
 
-                    <button @click="emit('create-task')" class="new-task-btn">
-                        <svg width="18" height="18">
-                            <use href="#icon-plus" />
-                        </svg>
-                        Nueva
-                    </button>
+                        <button
+                            @click="emit('create-task')"
+                            class="new-task-btn"
+                        >
+                            <svg width="18" height="18">
+                                <use href="#icon-plus" />
+                            </svg>
+                            Nueva
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1070,6 +1075,11 @@ const pageNumbers = computed(() => {
 .sort-select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.1);
+}
+
+.task-actions {
+    display: flex;
+    gap: 8px;
 }
 
 .delete-all-btn {
@@ -1671,13 +1681,18 @@ const pageNumbers = computed(() => {
         flex: 1;
     }
 
+    .task-actions {
+        width: 100%;
+    }
+
     .delete-all-btn {
-        flex: 1 1 auto;
-        min-width: 140px;
+        flex: 1;
+        justify-content: center;
     }
 
     .new-task-btn {
-        width: 100%;
+        flex: 1;
+        justify-content: center;
     }
 
     .list-view .task-card {

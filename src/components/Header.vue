@@ -544,15 +544,6 @@ const handleUserAction = () => {
                                     {{ syncError }}
                                 </div>
 
-                                <p
-                                    v-if="
-                                        !isThrottled && !isOffline && !syncError
-                                    "
-                                >
-                                    Tu data se sincroniza manualmente cuando
-                                    presionas el botón
-                                </p>
-
                                 <!-- Botón de sincronizar con estados -->
                                 <button
                                     v-if="!isSyncingNow"
@@ -746,6 +737,12 @@ const handleUserAction = () => {
     color: var(--text-primary);
     font-size: 14px;
     font-weight: 500;
+    /*
+       min-width fijo evita que el botón cambie de tamaño al hidratar
+       el estado de auth (sin user: solo icono SVG, con user: avatar + email).
+       Sin esto, el ancho variable genera layout shift en header-right.
+    */
+    min-width: 44px;
 }
 
 .user-btn:hover {
