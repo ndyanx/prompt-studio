@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { usePromptStore } from "../stores/usePromptStore";
 
 const props = defineProps({
@@ -39,11 +39,50 @@ const allVideos = computed(() => {
 
 const isEmpty = computed(() => allVideos.value.length === 0);
 
+// ─── Renderizado progresivo ───────────────────────────────────────────────
+// Con 1000 videos, montar 1000 nodos de golpe bloquea el hilo principal.
+// Empezamos renderizando los primeros INITIAL_RENDER videos (los visibles
+// inmediatamente) y vamos añadiendo BATCH_SIZE más en cada frame idle
+// hasta renderizar todos. El usuario ve contenido inmediato y el resto
+// aparece suavemente mientras el browser tiene tiempo libre.
+const INITIAL_RENDER = 40; // suficiente para llenar la pantalla inicial
+const BATCH_SIZE = 60; // cuántos añadir por frame idle
+const renderedCount = ref(INITIAL_RENDER);
+let idleCallbackId = null;
+
+const scheduleProgressiveRender = () => {
+    if (renderedCount.value >= allVideos.value.length) return;
+
+    const tick = () => {
+        renderedCount.value = Math.min(
+            renderedCount.value + BATCH_SIZE,
+            allVideos.value.length,
+        );
+        if (renderedCount.value < allVideos.value.length) {
+            idleCallbackId = requestIdleCallback(tick, { timeout: 300 });
+        }
+    };
+
+    idleCallbackId = requestIdleCallback(tick, { timeout: 300 });
+};
+
+// Cuando cambia allVideos (nueva tarea añadida, etc.) reiniciamos
+watch(
+    allVideos,
+    () => {
+        if (idleCallbackId) cancelIdleCallback(idleCallbackId);
+        renderedCount.value = INITIAL_RENDER;
+        scheduleProgressiveRender();
+    },
+    { flush: "post" },
+);
+
 // ─── Distribución horizontal en columnas ──────────────────────────────────
 const columns = computed(() => {
     const cols = colCount.value;
     const result = Array.from({ length: cols }, () => []);
-    allVideos.value.forEach((video, i) => {
+    // Solo distribuimos los videos ya renderizados
+    allVideos.value.slice(0, renderedCount.value).forEach((video, i) => {
         result[i % cols].push(video);
     });
     return result;
@@ -102,8 +141,12 @@ const initResizeObserver = () => {
 };
 
 // ─── IntersectionObserver ─────────────────────────────────────────────────
-// Usamos objeto plano en lugar de Set para que Vue detecte cambios
-// de forma limpia sin mutaciones que escapen a la reactividad.
+// visibleMap: objeto plano { [id]: true } para ids visibles.
+// NO usamos Set porque Vue no detecta mutaciones de Set limpiamente.
+// NO hacemos spread por cada entry — procesamos el batch completo de una vez
+// y hacemos UNA SOLA asignación a visibleMap.value por callback.
+// Con 400 videos y scroll rápido el callback puede llegar con 30+ entries;
+// hacer 30 spreads + 30 renders sería muy costoso.
 const visibleMap = ref({});
 const videoEls = {};
 
@@ -123,23 +166,35 @@ let intersectionObserver = null;
 const initIntersectionObserver = () => {
     intersectionObserver = new IntersectionObserver(
         (entries) => {
+            // Copia el mapa actual una sola vez
+            const next = { ...visibleMap.value };
+            let changed = false;
+
             entries.forEach((entry) => {
                 const id = entry.target.dataset.videoid;
                 if (!id) return;
+
                 if (entry.isIntersecting) {
-                    visibleMap.value = { ...visibleMap.value, [id]: true };
+                    if (!next[id]) {
+                        next[id] = true;
+                        changed = true;
+                    }
                     if (!modalVideo.value) {
                         videoEls[id]?.play().catch(() => {});
                     }
                 } else {
-                    const next = { ...visibleMap.value };
-                    delete next[id];
-                    visibleMap.value = next;
+                    if (next[id]) {
+                        delete next[id];
+                        changed = true;
+                    }
                     videoEls[id]?.pause();
                 }
             });
+
+            // Una sola asignación reactiva por batch → un solo render de Vue
+            if (changed) visibleMap.value = next;
         },
-        { rootMargin: "400px 0px 400px 0px", threshold: 0 },
+        { rootMargin: "200px 0px 200px 0px", threshold: 0 },
     );
 };
 
@@ -187,12 +242,14 @@ const handleKeydown = (e) => {
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────
 onMounted(() => {
+    scheduleProgressiveRender();
     initIntersectionObserver();
     window.addEventListener("keydown", handleKeydown);
     nextTick(initResizeObserver);
 });
 
 onUnmounted(() => {
+    if (idleCallbackId) cancelIdleCallback(idleCallbackId);
     intersectionObserver?.disconnect();
     resizeObserver?.disconnect();
     window.removeEventListener("keydown", handleKeydown);
@@ -255,7 +312,7 @@ onUnmounted(() => {
                         loop
                         playsinline
                         autoplay
-                        preload="metadata"
+                        preload="none"
                         @loadedmetadata="handleMetadata($event, video)"
                     />
                     <div v-else class="video-placeholder" />
@@ -353,6 +410,12 @@ onUnmounted(() => {
     background: var(--bg-primary);
     padding: 20px;
     box-sizing: border-box;
+    /* Oculta la scrollbar visualmente pero mantiene el scroll funcional */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE / Edge legacy */
+}
+.gallery-root::-webkit-scrollbar {
+    display: none; /* Chrome / Safari / Opera */
 }
 
 /* ─── Estado vacío ──────────────────────────────────────────────────────── */
@@ -615,7 +678,7 @@ onUnmounted(() => {
 .modal-video {
     width: 100%;
     height: 100%;
-    max-height: calc(80vh - 60px);
+    max-height: calc(92vh - 60px);
     object-fit: contain;
     display: block;
 }
