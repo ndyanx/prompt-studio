@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { db, Task, initDB, normalizeTask } from "../db/db";
 import { supabase } from "../supabase/supabaseClient";
-import { APP_EVENTS } from "../events/events";
 
 export const usePromptStore = defineStore("prompt", () => {
   // ─── Estado ───────────────────────────────────────────────────────────────
@@ -11,9 +10,11 @@ export const usePromptStore = defineStore("prompt", () => {
   const promptText = ref("");
 
   // Array de slots de media para la tarea activa.
-  // Cada slot: { url_post: string, url_video: string }
+  // Cada slot: { url_post: string, url_video: string, width: number|null, height: number|null }
   // Siempre tiene al menos un elemento.
-  const mediaList = ref([{ url_post: "", url_video: "" }]);
+  const mediaList = ref([
+    { url_post: "", url_video: "", width: null, height: null },
+  ]);
 
   let saveTimeout = null;
 
@@ -24,6 +25,8 @@ export const usePromptStore = defineStore("prompt", () => {
     mediaList.value.map((m) => ({
       url_post: m.url_post || "",
       url_video: m.url_video || "",
+      width: m.width || null,
+      height: m.height || null,
     }));
 
   /** Devuelve el nombre de la tabla según si hay sesión activa o no */
@@ -72,6 +75,9 @@ export const usePromptStore = defineStore("prompt", () => {
   };
 
   // ─── Auto-guardado ────────────────────────────────────────────────────────
+  // Los watchers van dentro del store. Pinia los registra correctamente
+  // y los mantiene activos mientras el store exista (toda la vida de la app).
+
   const scheduleSave = () => {
     if (!currentTask.value) return;
     clearTimeout(saveTimeout);
@@ -93,9 +99,9 @@ export const usePromptStore = defineStore("prompt", () => {
       await loadTasks();
     }
 
-    window.addEventListener(APP_EVENTS.SIGNED_OUT, clearLocalData);
-    window.addEventListener(APP_EVENTS.DATA_RESTORED, reloadTasks);
-    window.addEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
+    window.addEventListener("user-signed-out", clearLocalData);
+    window.addEventListener("data-restored", reloadTasks);
+    window.addEventListener("create-default-task", createNewTask);
   };
 
   const clearLocalData = async () => {
@@ -104,7 +110,9 @@ export const usePromptStore = defineStore("prompt", () => {
       tasks.value = [];
       currentTask.value = null;
       promptText.value = "";
-      mediaList.value = [{ url_post: "", url_video: "" }];
+      mediaList.value = [
+        { url_post: "", url_video: "", width: null, height: null },
+      ];
     } catch (error) {
       console.error("Error limpiando datos de sesión:", error);
     }
@@ -290,8 +298,13 @@ export const usePromptStore = defineStore("prompt", () => {
             prompt: task.prompt || "",
             media:
               Array.isArray(task.media) && task.media.length > 0
-                ? task.media
-                : [{ url_post: "", url_video: "" }],
+                ? task.media.map((m) => ({
+                    url_post: m.url_post || "",
+                    url_video: m.url_video || "",
+                    width: m.width || null,
+                    height: m.height || null,
+                  }))
+                : [{ url_post: "", url_video: "", width: null, height: null }],
             createdAt: task.createdAt || Date.now(),
             updatedAt: task.updatedAt || Date.now(),
           }));
@@ -312,15 +325,23 @@ export const usePromptStore = defineStore("prompt", () => {
 
   // ─── Gestión de slots de media ────────────────────────────────────────────
 
-  const updateMediaSlot = async (index, { url_post, url_video }) => {
+  const updateMediaSlot = async (
+    index,
+    { url_post, url_video, width = null, height = null },
+  ) => {
     if (index < 0 || index >= mediaList.value.length) return;
-    mediaList.value[index] = { url_post, url_video };
+    mediaList.value[index] = { url_post, url_video, width, height };
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(saveCurrentTask, 500);
   };
 
   const addMediaSlot = async () => {
-    mediaList.value.push({ url_post: "", url_video: "" });
+    mediaList.value.push({
+      url_post: "",
+      url_video: "",
+      width: null,
+      height: null,
+    });
     await saveCurrentTask();
   };
 
@@ -365,14 +386,52 @@ export const usePromptStore = defineStore("prompt", () => {
     }
   };
 
+  /**
+   * Persiste width/height de un slot cuando se descubren en runtime
+   * (videos que no tenían dimensiones en el JSON importado).
+   * No modifica updatedAt ni dispara autosave.
+   */
+  const updateMediaDimensions = async (taskId, slotIndex, width, height) => {
+    try {
+      const tableName = await getTable();
+      const task = tasks.value.find((t) => t.id === taskId);
+      if (!task) return;
+
+      const normalizedTask = normalizeTask(task);
+      if (!normalizedTask.media[slotIndex]) return;
+
+      // Si ya tiene los mismos valores no hacemos nada
+      const slot = normalizedTask.media[slotIndex];
+      if (slot.width === width && slot.height === height) return;
+
+      normalizedTask.media[slotIndex] = { ...slot, width, height };
+
+      const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
+      await db[tableName].put(payload);
+
+      const index = tasks.value.findIndex((t) => t.id === taskId);
+      if (index !== -1) tasks.value[index] = normalizedTask;
+
+      if (currentTask.value?.id === taskId && mediaList.value[slotIndex]) {
+        mediaList.value[slotIndex] = {
+          ...mediaList.value[slotIndex],
+          width,
+          height,
+        };
+      }
+    } catch (error) {
+      console.error("Error guardando dimensiones:", error);
+    }
+  };
+
   const reloadTasks = async () => {
     await loadTasks();
   };
 
   const cleanup = () => {
-    window.removeEventListener(APP_EVENTS.SIGNED_OUT, clearLocalData);
-    window.removeEventListener(APP_EVENTS.DATA_RESTORED, reloadTasks);
-    window.removeEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
+    window.removeEventListener("user-signed-out", clearLocalData);
+    window.removeEventListener("data-restored", reloadTasks);
+    window.removeEventListener("create-default-task", createNewTask);
   };
 
   return {
@@ -398,6 +457,7 @@ export const usePromptStore = defineStore("prompt", () => {
     addMediaSlot,
     removeMediaSlot,
     updateTaskVideoUrl,
+    updateMediaDimensions,
     reloadTasks,
     cleanup,
   };

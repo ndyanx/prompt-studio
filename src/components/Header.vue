@@ -35,6 +35,9 @@ const {
     throttleSecondsRemaining,
 } = storeToRefs(syncStore);
 
+// Las acciones NO van en storeToRefs — se desestructuran directo del store.
+const { manualSync } = syncStore;
+
 const formatSyncTime = computed(() => {
     if (!lastSyncTime.value) return "Nunca";
 

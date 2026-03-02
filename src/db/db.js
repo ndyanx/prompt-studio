@@ -37,8 +37,13 @@ export function normalizeTask(raw) {
     ...raw,
     media:
       Array.isArray(raw.media) && raw.media.length > 0
-        ? raw.media
-        : [{ url_post: "", url_video: "" }],
+        ? raw.media.map((m) => ({
+            url_post: m.url_post || "",
+            url_video: m.url_video || "",
+            width: m.width || null,
+            height: m.height || null,
+          }))
+        : [{ url_post: "", url_video: "", width: null, height: null }],
   };
 }
 
@@ -49,8 +54,13 @@ export class Task {
     this.prompt = data.prompt || "Escribe tu prompt aquí.";
     this.media =
       Array.isArray(data.media) && data.media.length > 0
-        ? data.media
-        : [{ url_post: "", url_video: "" }];
+        ? data.media.map((m) => ({
+            url_post: m.url_post || "",
+            url_video: m.url_video || "",
+            width: m.width || null,
+            height: m.height || null,
+          }))
+        : [{ url_post: "", url_video: "", width: null, height: null }];
     this.createdAt = data.createdAt || Date.now();
     this.updatedAt = data.updatedAt || Date.now();
   }

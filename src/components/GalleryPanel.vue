@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import { usePromptStore } from "../stores/usePromptStore";
 
 const props = defineProps({
     tasks: {
@@ -9,8 +10,9 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["go-to-task"]);
+const promptStore = usePromptStore();
 
-// ─── Aplanar todos los videos de todas las tareas ─────────────────────────
+// ─── Aplanar y ordenar videos ─────────────────────────────────────────────
 const allVideos = computed(() => {
     const videos = [];
     props.tasks.forEach((task) => {
@@ -24,40 +26,149 @@ const allVideos = computed(() => {
                     url_video: slot.url_video,
                     url_post: slot.url_post || "",
                     slotIndex,
+                    width: slot.width || null,
+                    height: slot.height || null,
+                    createdAt: task.createdAt,
                 });
             }
         });
     });
+    videos.sort((a, b) => b.createdAt - a.createdAt);
     return videos;
 });
 
 const isEmpty = computed(() => allVideos.value.length === 0);
 
-// ─── Estado de visibilidad por video (virtualización) ─────────────────────
-// Guardamos aspect ratio para reservar espacio cuando el elemento no está en DOM
-const aspectRatios = ref({}); // id → número (w/h)
-const visibleIds = ref(new Set()); // ids actualmente observados como visibles
+// ─── Distribución horizontal en columnas ──────────────────────────────────
+const columns = computed(() => {
+    const cols = colCount.value;
+    const result = Array.from({ length: cols }, () => []);
+    allVideos.value.forEach((video, i) => {
+        result[i % cols].push(video);
+    });
+    return result;
+});
+
+// ─── Aspect ratio ─────────────────────────────────────────────────────────
+const runtimeRatios = ref({});
+
+const getCardAspect = (video) => {
+    if (video.width && video.height) return `${video.width} / ${video.height}`;
+    if (runtimeRatios.value[video.id])
+        return `${runtimeRatios.value[video.id]} / 1`;
+    return "9 / 16";
+};
+
+// ─── Metadata handler ─────────────────────────────────────────────────────
+const handleMetadata = (e, video) => {
+    const { videoWidth, videoHeight } = e.target;
+    if (!videoWidth || !videoHeight) return;
+    e.target.play().catch(() => {});
+    if (video.width && video.height) return;
+    runtimeRatios.value[video.id] = videoWidth / videoHeight;
+    promptStore.updateMediaDimensions(
+        video.taskId,
+        video.slotIndex,
+        videoWidth,
+        videoHeight,
+    );
+};
+
+// ─── Columnas responsivas via ResizeObserver ──────────────────────────────
+const rootRef = ref(null);
+const colCount = ref(5);
+
+const getColsForWidth = (width) => {
+    if (width < 500) return 1;
+    if (width < 750) return 2;
+    if (width < 1050) return 3;
+    if (width < 1400) return 4;
+    return 5;
+};
+
+let resizeObserver = null;
+
+const initResizeObserver = () => {
+    if (!rootRef.value) return;
+    const initialWidth = rootRef.value.offsetWidth || window.innerWidth;
+    colCount.value = getColsForWidth(initialWidth);
+    resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+            const width = entry.contentRect.width;
+            if (width > 0) colCount.value = getColsForWidth(width);
+        }
+    });
+    resizeObserver.observe(rootRef.value);
+};
+
+// ─── IntersectionObserver ─────────────────────────────────────────────────
+// Usamos objeto plano en lugar de Set para que Vue detecte cambios
+// de forma limpia sin mutaciones que escapen a la reactividad.
+const visibleMap = ref({});
+const videoEls = {};
+
+const setCardRef = (el, id) => {
+    if (el) intersectionObserver?.observe(el);
+};
+
+const setVideoRef = (el, id) => {
+    if (el) videoEls[id] = el;
+    else delete videoEls[id];
+};
+
+const isVisible = (id) => !!visibleMap.value[id];
+
+let intersectionObserver = null;
+
+const initIntersectionObserver = () => {
+    intersectionObserver = new IntersectionObserver(
+        (entries) => {
+            entries.forEach((entry) => {
+                const id = entry.target.dataset.videoid;
+                if (!id) return;
+                if (entry.isIntersecting) {
+                    visibleMap.value = { ...visibleMap.value, [id]: true };
+                    if (!modalVideo.value) {
+                        videoEls[id]?.play().catch(() => {});
+                    }
+                } else {
+                    const next = { ...visibleMap.value };
+                    delete next[id];
+                    visibleMap.value = next;
+                    videoEls[id]?.pause();
+                }
+            });
+        },
+        { rootMargin: "400px 0px 400px 0px", threshold: 0 },
+    );
+};
 
 // ─── Modal ────────────────────────────────────────────────────────────────
-const modalVideo = ref(null); // { id, taskId, taskName, url_video, url_post }
+const modalVideo = ref(null);
 const modalVideoRef = ref(null);
+
+const pauseAllGridVideos = () => {
+    Object.values(videoEls).forEach((el) => el?.pause());
+};
+
+const resumeVisibleGridVideos = () => {
+    Object.keys(visibleMap.value).forEach((id) => {
+        videoEls[id]?.play().catch(() => {});
+    });
+};
 
 const openModal = (video) => {
     modalVideo.value = video;
     document.body.style.overflow = "hidden";
-    nextTick(() => {
-        if (modalVideoRef.value) {
-            modalVideoRef.value.play().catch(() => {});
-        }
-    });
+    pauseAllGridVideos();
+    nextTick(() => modalVideoRef.value?.play().catch(() => {}));
 };
 
 const closeModal = () => {
-    if (modalVideoRef.value) {
-        modalVideoRef.value.pause();
-    }
+    modalVideoRef.value?.pause();
     modalVideo.value = null;
     document.body.style.overflow = "";
+    resumeVisibleGridVideos();
 };
 
 const handleGoToTask = () => {
@@ -70,75 +181,27 @@ const handleModalOverlayClick = (e) => {
     if (e.target === e.currentTarget) closeModal();
 };
 
-// Cerrar modal con Escape
 const handleKeydown = (e) => {
     if (e.key === "Escape" && modalVideo.value) closeModal();
 };
 
-// ─── IntersectionObserver para virtualización ─────────────────────────────
-let observer = null;
-const cardRefs = ref({});
-
-const setCardRef = (el, id) => {
-    if (el) {
-        cardRefs.value[id] = el;
-        if (observer) observer.observe(el);
-    }
-};
-
-const initObserver = () => {
-    observer = new IntersectionObserver(
-        (entries) => {
-            entries.forEach((entry) => {
-                const id = entry.target.dataset.videoid;
-                if (!id) return;
-                if (entry.isIntersecting) {
-                    visibleIds.value.add(id);
-                } else {
-                    // Solo desmontamos si está muy lejos del viewport (rootMargin negativo)
-                    visibleIds.value.delete(id);
-                }
-            });
-        },
-        {
-            // Precargamos 400px antes/después del viewport para evitar flash al scrollear
-            rootMargin: "400px 0px 400px 0px",
-            threshold: 0,
-        },
-    );
-};
-
-const isVisible = (id) => visibleIds.value.has(id);
-
-// Cuando el video carga metadatos, guardamos el aspect ratio
-const handleMetadata = (e, id) => {
-    const { videoWidth, videoHeight } = e.target;
-    if (videoWidth && videoHeight) {
-        aspectRatios.value[id] = videoWidth / videoHeight;
-    }
-};
-
-// Calcula el padding-bottom para reservar espacio cuando el video no está visible
-const getAspectStyle = (id) => {
-    const ratio = aspectRatios.value[id];
-    if (!ratio) return { paddingBottom: "177.78%" }; // default 9:16 (vertical)
-    return { paddingBottom: `${(1 / ratio) * 100}%` };
-};
-
+// ─── Lifecycle ────────────────────────────────────────────────────────────
 onMounted(() => {
-    initObserver();
+    initIntersectionObserver();
     window.addEventListener("keydown", handleKeydown);
+    nextTick(initResizeObserver);
 });
 
 onUnmounted(() => {
-    observer?.disconnect();
+    intersectionObserver?.disconnect();
+    resizeObserver?.disconnect();
     window.removeEventListener("keydown", handleKeydown);
     document.body.style.overflow = "";
 });
 </script>
 
 <template>
-    <div class="gallery-root">
+    <div ref="rootRef" class="gallery-root">
         <!-- Estado vacío -->
         <div v-if="isEmpty" class="gallery-empty">
             <div class="empty-icon">
@@ -160,21 +223,32 @@ onUnmounted(() => {
             </p>
         </div>
 
-        <!-- Grid de videos -->
-        <div v-else class="gallery-grid">
+        <!-- Grid masonry -->
+        <!-- El fondo desaparece con un overlay ::after en lugar de filter en el grid.
+             filter obliga al browser a repintar TODOS los hijos en cada frame — muy costoso.
+             El overlay es una capa independiente que el compositor maneja en GPU. -->
+        <div
+            v-else
+            class="gallery-masonry"
+            :class="{ 'modal-open': modalVideo }"
+        >
             <div
-                v-for="video in allVideos"
-                :key="video.id"
-                :ref="(el) => setCardRef(el, video.id)"
-                :data-videoid="video.id"
-                class="gallery-card"
-                @click="openModal(video)"
+                v-for="(col, colIndex) in columns"
+                :key="colIndex"
+                class="gallery-column"
             >
-                <!-- Contenedor con aspect ratio reservado -->
-                <div class="video-aspect" :style="getAspectStyle(video.id)">
-                    <!-- Video real solo si está en viewport -->
+                <div
+                    v-for="video in col"
+                    :key="video.id"
+                    :ref="(el) => setCardRef(el, video.id)"
+                    :data-videoid="video.id"
+                    class="gallery-card"
+                    :style="{ aspectRatio: getCardAspect(video) }"
+                    @click="openModal(video)"
+                >
                     <video
                         v-if="isVisible(video.id)"
+                        :ref="(el) => setVideoRef(el, video.id)"
                         class="gallery-video"
                         :src="video.url_video"
                         muted
@@ -182,28 +256,23 @@ onUnmounted(() => {
                         playsinline
                         autoplay
                         preload="metadata"
-                        @loadedmetadata="handleMetadata($event, video.id)"
-                        @mouseenter="(e) => e.target.play().catch(() => {})"
-                        @mouseleave="
-                            (e) => {
-                                e.target.pause();
-                                e.target.currentTime = 0;
-                            }
-                        "
+                        @loadedmetadata="handleMetadata($event, video)"
                     />
-                    <!-- Placeholder mientras no está visible -->
-                    <div v-else class="video-placeholder-thumb" />
-                </div>
+                    <div v-else class="video-placeholder" />
 
-                <!-- Overlay con nombre de tarea -->
-                <div class="card-overlay">
-                    <span class="card-task-name">{{ video.taskName }}</span>
+                    <div class="card-overlay">
+                        <span class="card-task-name">{{ video.taskName }}</span>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Contador -->
-        <div v-if="!isEmpty" class="gallery-footer">
+        <div
+            v-if="!isEmpty"
+            class="gallery-footer"
+            :class="{ 'modal-open': modalVideo }"
+        >
             {{ allVideos.length }} video{{ allVideos.length !== 1 ? "s" : "" }}
         </div>
 
@@ -215,7 +284,6 @@ onUnmounted(() => {
                 @click="handleModalOverlayClick"
             >
                 <div class="modal-content">
-                    <!-- Header del modal -->
                     <div class="modal-header">
                         <span class="modal-task-name">{{
                             modalVideo.taskName
@@ -224,7 +292,6 @@ onUnmounted(() => {
                             <button
                                 class="modal-btn goto-btn"
                                 @click="handleGoToTask"
-                                title="Ir a la tarea"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -244,7 +311,6 @@ onUnmounted(() => {
                             <button
                                 class="modal-btn close-btn"
                                 @click="closeModal"
-                                title="Cerrar"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -261,8 +327,6 @@ onUnmounted(() => {
                             </button>
                         </div>
                     </div>
-
-                    <!-- Video en modal -->
                     <div class="modal-video-wrapper">
                         <video
                             ref="modalVideoRef"
@@ -282,7 +346,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* ─── Raíz ─────────────────────────────────────────────────────────────── */
 .gallery-root {
     width: 100%;
     height: 100%;
@@ -304,64 +367,98 @@ onUnmounted(() => {
     text-align: center;
     padding: 40px;
 }
-
 .empty-icon {
     opacity: 0.25;
     margin-bottom: 8px;
 }
-
 .empty-title {
     font-size: 17px;
     font-weight: 600;
     color: var(--text-primary);
 }
-
 .empty-sub {
     font-size: 13px;
     max-width: 280px;
     line-height: 1.5;
 }
 
-/* ─── Grid de columnas ──────────────────────────────────────────────────── */
-.gallery-grid {
-    columns: 4;
-    column-gap: 10px;
+/* ─── Masonry ───────────────────────────────────────────────────────────── */
+.gallery-masonry {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    /* Sin transition aquí — filter/opacity en el grid completo es muy costoso */
+    position: relative;
+}
+
+/*
+   Overlay oscuro al abrir modal.
+   Usamos ::after en lugar de filter/opacity sobre el grid:
+   - filter repinta TODOS los hijos en cada frame de animación → bloquea el hilo principal
+   - ::after es una capa independiente → el compositor la anima en GPU sin tocar los hijos
+*/
+.gallery-masonry::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0);
+    pointer-events: none;
+    z-index: 1999; /* justo debajo del modal (2000) */
+    transition: background 0.25s ease;
+}
+.gallery-masonry.modal-open::after {
+    background: rgba(0, 0, 0, 0.75);
+    pointer-events: auto;
+}
+.gallery-masonry.modal-open {
+    pointer-events: none;
+}
+
+.gallery-footer.modal-open {
+    opacity: 0;
+    transition: opacity 0.25s ease;
+}
+
+.gallery-column {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 /* ─── Tarjeta ───────────────────────────────────────────────────────────── */
 .gallery-card {
     position: relative;
-    break-inside: avoid;
-    margin-bottom: 10px;
+    width: 100%;
     border-radius: 14px;
     overflow: hidden;
     cursor: pointer;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
+    flex-shrink: 0;
+    /*
+       will-change promueve cada card a su propia capa de composición.
+       El hover:scale no afecta al layout de sus hermanos y el browser
+       no necesita recalcular paint para el resto del grid.
+    */
+    will-change: transform;
     transition:
         transform 0.2s ease,
         box-shadow 0.2s ease;
 }
-
 .gallery-card:hover {
     transform: scale(1.015);
     box-shadow: var(--shadow-lg);
     border-color: transparent;
 }
-
 .gallery-card:hover .card-overlay {
     opacity: 1;
 }
 
-/* ─── Aspect ratio wrapper ──────────────────────────────────────────────── */
-.video-aspect {
-    position: relative;
-    width: 100%;
-    height: 0; /* el padding-bottom lo controla */
-}
-
+/* ─── Video y placeholder ───────────────────────────────────────────────── */
 .gallery-video,
-.video-placeholder-thumb {
+.video-placeholder {
     position: absolute;
     inset: 0;
     width: 100%;
@@ -369,12 +466,11 @@ onUnmounted(() => {
     object-fit: cover;
     display: block;
 }
-
-.video-placeholder-thumb {
+.video-placeholder {
     background: var(--bg-secondary);
 }
 
-/* ─── Overlay nombre de tarea ───────────────────────────────────────────── */
+/* ─── Overlay nombre ────────────────────────────────────────────────────── */
 .card-overlay {
     position: absolute;
     bottom: 0;
@@ -390,7 +486,6 @@ onUnmounted(() => {
     transition: opacity 0.2s ease;
     pointer-events: none;
 }
-
 .card-task-name {
     font-size: 11px;
     font-weight: 600;
@@ -402,28 +497,26 @@ onUnmounted(() => {
     display: block;
 }
 
-/* ─── Footer contador ───────────────────────────────────────────────────── */
+/* ─── Footer ────────────────────────────────────────────────────────────── */
 .gallery-footer {
     text-align: center;
     font-size: 12px;
     color: var(--text-secondary);
     padding: 20px 0 10px;
+    transition: opacity 0.25s ease;
 }
 
-/* ─── Modal overlay ─────────────────────────────────────────────────────── */
+/* ─── Modal ─────────────────────────────────────────────────────────────── */
 .modal-overlay {
     position: fixed;
     inset: 0;
     z-index: 2000;
-    background: rgba(0, 0, 0, 0.88);
-    backdrop-filter: blur(12px);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    animation: fadeIn 0.18s ease;
+    animation: fadeIn 0.22s ease;
 }
-
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -433,7 +526,6 @@ onUnmounted(() => {
     }
 }
 
-/* ─── Modal contenido ───────────────────────────────────────────────────── */
 .modal-content {
     position: relative;
     display: flex;
@@ -441,9 +533,8 @@ onUnmounted(() => {
     max-width: min(92vw, 900px);
     max-height: 92vh;
     width: 100%;
-    animation: slideUp 0.2s ease;
+    animation: slideUp 0.22s ease;
 }
-
 @keyframes slideUp {
     from {
         transform: translateY(16px);
@@ -454,8 +545,6 @@ onUnmounted(() => {
         opacity: 1;
     }
 }
-
-/* ─── Modal header ──────────────────────────────────────────────────────── */
 .modal-header {
     display: flex;
     align-items: center;
@@ -463,7 +552,6 @@ onUnmounted(() => {
     padding: 0 0 12px 2px;
     flex-shrink: 0;
 }
-
 .modal-task-name {
     font-size: 14px;
     font-weight: 600;
@@ -476,14 +564,12 @@ onUnmounted(() => {
     min-width: 0;
     margin-right: 12px;
 }
-
 .modal-actions {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
 }
-
 .modal-btn {
     display: flex;
     align-items: center;
@@ -499,28 +585,23 @@ onUnmounted(() => {
         background 0.15s ease,
         transform 0.15s ease;
 }
-
 .goto-btn {
     background: var(--accent);
     color: #fff;
 }
-
 .goto-btn:hover {
     background: var(--accent-hover);
     transform: scale(1.03);
 }
-
 .close-btn {
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
     padding: 7px;
 }
-
 .close-btn:hover {
     background: rgba(255, 59, 48, 0.7);
 }
 
-/* ─── Modal video ───────────────────────────────────────────────────────── */
 .modal-video-wrapper {
     border-radius: 14px;
     overflow: hidden;
@@ -531,34 +612,24 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
 }
-
 .modal-video {
     width: 100%;
     height: 100%;
-    max-height: calc(92vh - 60px);
+    max-height: calc(80vh - 60px);
     object-fit: contain;
     display: block;
 }
 
-/* ─── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
     .gallery-root {
         padding: 12px;
     }
-
-    .gallery-grid {
-        columns: 1;
-    }
-
     .modal-overlay {
         padding: 12px;
-        align-items: center;
     }
-
     .modal-content {
         max-height: 95vh;
     }
-
     .modal-video {
         max-height: calc(95vh - 60px);
     }

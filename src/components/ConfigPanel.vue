@@ -296,6 +296,8 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 <VideoPreview
                     :url-post="slot.url_post"
                     :url-video="slot.url_video"
+                    :width="slot.width"
+                    :height="slot.height"
                     :is-visible="true"
                     @update-urls="updateMediaSlot(index, $event)"
                 />

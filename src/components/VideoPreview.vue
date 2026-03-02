@@ -6,6 +6,8 @@ const VITE_PROXY_API = import.meta.env.VITE_PROXY_API;
 const props = defineProps({
     urlPost: String,
     urlVideo: String,
+    width: { type: Number, default: null },
+    height: { type: Number, default: null },
     isVisible: Boolean,
 });
 
@@ -126,6 +128,8 @@ const extractVideoUrl = async (postUrl) => {
         emit("update-urls", {
             url_post: postUrl,
             url_video: videoUrl,
+            width: post.width || post.resolution?.width || null,
+            height: post.height || post.resolution?.height || null,
         });
     } catch (error) {
         console.error("Error al extraer URL de video:", error);
@@ -151,6 +155,8 @@ const handleUrlInput = (event) => {
         emit("update-urls", {
             url_post: newUrl,
             url_video: localUrlVideo.value,
+            width: props.width,
+            height: props.height,
         });
     }, 400);
 };
