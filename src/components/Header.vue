@@ -927,7 +927,7 @@ const handleUserAction = () => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 0;
+    padding: 3px 0;
 }
 
 .sidebar-label {
