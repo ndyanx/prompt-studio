@@ -678,7 +678,7 @@ onUnmounted(() => {
 .modal-video {
     width: 100%;
     height: 100%;
-    max-height: calc(92vh - 60px);
+    max-height: calc(80vh - 60px);
     object-fit: contain;
     display: block;
 }
