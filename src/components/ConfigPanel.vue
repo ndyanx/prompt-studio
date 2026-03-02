@@ -15,7 +15,7 @@ const emit = defineEmits([
     "update-task-name",
     "show-tasks",
     "export-tasks",
-    "show-album",
+    "show-random-video",
 ]);
 
 const promptStore = usePromptStore();
@@ -192,7 +192,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                         </button>
                         <button
                             class="action-btn album-btn"
-                            @click="emit('show-album')"
+                            @click="emit('show-random-video')"
                             title="Ver álbum de videos"
                         >
                             <svg
@@ -214,7 +214,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                                     ry="2"
                                 />
                             </svg>
-                            <span v-if="!isMobile">Álbum</span>
+                            <span v-if="!isMobile">Random</span>
                         </button>
                     </div>
                 </div>

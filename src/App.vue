@@ -7,7 +7,7 @@ import Header from "./components/Header.vue";
 import TasksPanel from "./components/TasksPanel.vue";
 import MobileTabBar from "./components/MobileTabBar.vue";
 import AuthModal from "./components/AuthModal.vue";
-import AlbumModal from "./components/AlbumModal.vue";
+import RandomVideoModal from "./components/RandomVideoModal.vue";
 
 import { useThemeStore } from "./stores/useThemeStore";
 import { useAuthStore } from "./stores/useAuthStore";
@@ -21,7 +21,7 @@ const promptStore = usePromptStore();
 
 // ─── Estado local de UI ───────────────────────────────────────────────────
 const showTasks = ref(false);
-const showAlbum = ref(false);
+const showRandomVideo = ref(false);
 const isMobile = ref(false);
 const activeView = ref("config"); // "config" | "preview" (mobile)
 const activeMainView = ref("studio"); // "studio" | "gallery"
@@ -125,10 +125,10 @@ const showPreview = computed(
                 :all-tasks="promptStore.tasks"
                 :is-mobile="isMobile"
                 :media-list="promptStore.mediaList"
-                :show-album="showAlbum"
+                :show-random-video="showRandomVideo"
                 @update-task-name="promptStore.updateTaskName"
                 @show-tasks="showTasks = true"
-                @show-album="showAlbum = true"
+                @show-random-video="showRandomVideo = true"
                 @export-tasks="promptStore.exportTasks"
             />
 
@@ -172,11 +172,11 @@ const showPreview = computed(
                 @close="showAuthModal = false"
             />
 
-            <AlbumModal
-                v-if="showAlbum"
-                :is-open="showAlbum"
+            <RandomVideoModal
+                v-if="showRandomVideo"
+                :is-open="showRandomVideo"
                 :tasks="promptStore.tasks"
-                @close="showAlbum = false"
+                @close="showRandomVideo = false"
                 @select-task="handleSelectTask"
             />
         </div>
