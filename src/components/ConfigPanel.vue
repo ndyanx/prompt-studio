@@ -422,6 +422,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+    contain: layout;
 }
 
 .action-btn {
@@ -552,7 +553,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 .media-list {
     display: flex;
     flex-direction: column;
-    min-height: 200px;
     flex-shrink: 0;
 }
 .media-slot {

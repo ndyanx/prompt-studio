@@ -238,37 +238,41 @@ const handleVideoError = () => {
             </button>
         </div>
 
-        <div v-if="localUrlVideo" class="video-url-display">
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-            >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-            </svg>
-            <span class="video-url-text">{{ localUrlVideo }}</span>
-        </div>
+        <!-- Zona de estado: altura fija para que url-display y error no
+             desplacen el video/placeholder al aparecer/desaparecer -->
+        <div class="status-zone">
+            <div v-if="localUrlVideo" class="video-url-display">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span class="video-url-text">{{ localUrlVideo }}</span>
+            </div>
 
-        <div v-if="errorMessage" class="error-message">
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-            >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            {{ errorMessage }}
+            <div v-if="errorMessage" class="error-message">
+                <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                {{ errorMessage }}
+            </div>
         </div>
 
         <div
@@ -480,6 +484,17 @@ const handleVideoError = () => {
     }
 }
 
+/* Zona de altura fija para url-display y error-message.
+   Evita que su aparición/desaparición desplace el video/placeholder. */
+.status-zone {
+    height: 46px;
+    margin-bottom: 4px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
 .video-url-display {
     display: flex;
     align-items: center;
@@ -488,7 +503,6 @@ const handleVideoError = () => {
     background: rgba(10, 132, 255, 0.1);
     border: 1px solid rgba(10, 132, 255, 0.3);
     border-radius: 8px;
-    margin-bottom: 10px;
     font-size: 11px;
     color: var(--accent);
 }
@@ -513,7 +527,6 @@ const handleVideoError = () => {
     background: rgba(255, 59, 48, 0.1);
     border: 1px solid rgba(255, 59, 48, 0.3);
     border-radius: 8px;
-    margin-bottom: 10px;
     font-size: 12px;
     color: #ff3b30;
 }
@@ -553,27 +566,33 @@ const handleVideoError = () => {
     width: 100%;
     height: auto;
     display: block;
-    max-height: 400px;
+    max-height: 360px;
     object-fit: contain;
 }
 
 .video-container.expanded .video-player {
+    position: static;
+    width: 100%;
+    height: auto;
     max-height: 90vh;
 }
 
+/* El placeholder tiene altura fija igual al max-height del video.
+   Así el switch placeholder↔video NO cambia la altura del layout. */
 .video-placeholder {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 12px;
-    padding: 40px 20px;
+    height: 360px;
     background: var(--bg-secondary);
     border-radius: 10px;
     border: 1px dashed var(--border-color);
     color: var(--text-secondary);
     font-size: 14px;
     text-align: center;
+    padding: 20px;
 }
 
 .video-placeholder svg {
@@ -603,7 +622,11 @@ const handleVideoError = () => {
     }
 
     .video-player {
-        max-height: 250px;
+        max-height: 260px;
+    }
+
+    .video-placeholder {
+        height: 260px;
     }
 
     .video-container.expanded {
@@ -613,10 +636,6 @@ const handleVideoError = () => {
 
     .video-container.expanded .video-player {
         max-height: 80vh;
-    }
-
-    .video-placeholder {
-        padding: 30px 15px;
     }
 
     .video-placeholder svg {
@@ -640,6 +659,10 @@ const handleVideoError = () => {
 @media (max-width: 480px) {
     .video-player {
         max-height: 200px;
+    }
+
+    .video-placeholder {
+        height: 200px;
     }
 
     .url-input-container {

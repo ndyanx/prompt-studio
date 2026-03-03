@@ -22,7 +22,10 @@ const promptStore = usePromptStore();
 // ─── Estado local de UI ───────────────────────────────────────────────────
 const showTasks = ref(false);
 const showRandomVideo = ref(false);
-const isMobile = ref(false);
+// Inicializar síncronamente antes del primer render para evitar CLS.
+// Si empieza en `false` y onMounted lo cambia a `true`, los
+// <span v-if="!isMobile"> en header-actions desaparecen post-paint.
+const isMobile = ref(window.innerWidth <= 1024);
 const activeView = ref("config"); // "config" | "preview" (mobile)
 const activeMainView = ref("studio"); // "studio" | "gallery"
 const showAuthModal = ref(false);
