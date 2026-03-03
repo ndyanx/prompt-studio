@@ -15,6 +15,7 @@ export const useAuthStore = defineStore("auth", () => {
   const isAuthenticated = computed(() => !!user.value);
 
   // ─── Actions ──────────────────────────────────────────────────────────────
+
   const initAuth = async () => {
     try {
       isLoading.value = true;
@@ -24,14 +25,14 @@ export const useAuthStore = defineStore("auth", () => {
         data: { session },
       } = await supabase.auth.getSession();
 
-      // onAuthStateChange es la única fuente de verdad para user.
-      // No seteamos user.value manualmente en signIn/signOut.
+      // onAuthStateChange es la única fuente de verdad para user.value.
+      // No se setea manualmente en signIn/signOut.
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         user.value = session?.user || null;
       });
       authSubscription = data.subscription;
 
-      // Valor inicial síncrono mientras el callback asíncrono llega
+      // Valor inicial síncrono mientras llega el primer callback asíncrono
       user.value = session?.user || null;
     } catch (error) {
       console.error("Error en auth:", error);
@@ -84,7 +85,6 @@ export const useAuthStore = defineStore("auth", () => {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
 
-      // onAuthStateChange pondrá user.value en null automáticamente
       emit(APP_EVENTS.SIGNED_OUT);
       return { success: true };
     } catch (error) {
@@ -99,13 +99,10 @@ export const useAuthStore = defineStore("auth", () => {
   };
 
   return {
-    // Estado
     user,
     isLoading,
     authError,
-    // Getters
     isAuthenticated,
-    // Actions
     initAuth,
     signUp,
     signIn,

@@ -19,18 +19,13 @@ const isRandomizing = ref(false);
 const cooldownSeconds = ref(0);
 let cooldownInterval = null;
 
-const tasksWithVideoCache = ref([]);
-const lastTasksLength = ref(0);
-
+// Vue cachea este computed automáticamente por sus dependencias reactivas.
+// El cache manual anterior (tasksWithVideoCache + lastTasksLength) era código
+// de más que además tenía un bug: si el usuario editaba la URL de un video
+// (mismo número de tasks, distinto contenido) el computed devolvía el cache
+// desactualizado en lugar de recalcular.
 const tasksWithVideo = computed(() => {
-    if (
-        props.tasks.length === lastTasksLength.value &&
-        tasksWithVideoCache.value.length > 0
-    ) {
-        return tasksWithVideoCache.value;
-    }
-
-    const filtered = props.tasks
+    return props.tasks
         .map((task) => {
             if (!Array.isArray(task.media)) {
                 return {
@@ -48,11 +43,6 @@ const tasksWithVideo = computed(() => {
         .filter((task) =>
             task.media.some((m) => m.url_video && m.url_video.trim() !== ""),
         );
-
-    tasksWithVideoCache.value = filtered;
-    lastTasksLength.value = props.tasks.length;
-
-    return filtered;
 });
 
 const currentTask = computed(() => {
@@ -355,7 +345,9 @@ onUnmounted(() => {
     padding: 60px 40px;
     text-align: center;
     color: rgba(255, 255, 255, 0.5);
-    background: var(--bg-primary);
+    /* Fondo siempre oscuro — el modal tiene estética dark independiente del tema.
+       var(--bg-primary) en modo claro es blanco, haciendo el texto #fff invisible. */
+    background: #1c1c1e;
     border-radius: 14px;
 }
 .empty-icon {

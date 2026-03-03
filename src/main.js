@@ -3,7 +3,6 @@ import { createPinia } from "pinia";
 import "./assets/styles/main.css";
 import App from "./App.vue";
 
-// Importar stores para inicializarlos al arrancar
 import { useAuthStore } from "./stores/useAuthStore";
 import { usePromptStore } from "./stores/usePromptStore";
 import { useSyncStore } from "./stores/useSyncStore";
@@ -15,19 +14,20 @@ const pinia = createPinia();
 app.use(pinia);
 app.mount("#app");
 
-// Inicializar stores en orden correcto:
-// 1. Tema (sin dependencias)
-// 2. Auth (sin dependencias de otros stores)
-// 3. Sync (orquesta la restauración de datos)
-// 4. Prompt (reacciona a los eventos de sync y auth)
-const themeStore = useThemeStore();
-themeStore.initTheme();
+// Los stores se inicializan en orden estrictamente secuencial:
+// syncStore debe terminar antes de que promptStore arranque, ya que puede
+// limpiar IndexedDB y restaurar datos desde Supabase. Ejecutarlos en paralelo
+// causaría BulkError ("Key already exists") durante el clear()+bulkPut().
+(async () => {
+  const themeStore = useThemeStore();
+  themeStore.initTheme();
 
-const authStore = useAuthStore();
-authStore.initAuth();
+  const authStore = useAuthStore();
+  await authStore.initAuth();
 
-const syncStore = useSyncStore();
-syncStore.initSync();
+  const syncStore = useSyncStore();
+  await syncStore.initSync();
 
-const promptStore = usePromptStore();
-promptStore.init();
+  const promptStore = usePromptStore();
+  await promptStore.init();
+})();

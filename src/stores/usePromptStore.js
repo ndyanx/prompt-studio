@@ -1,26 +1,33 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
-import { db, Task, initDB, normalizeTask } from "../db/db";
-import { supabase } from "../supabase/supabaseClient";
+import { db, Task, initDB, normalizeTask, SYNC_OPERATIONS } from "../db/db";
+import { useSyncStore } from "../stores/useSyncStore";
+import { APP_EVENTS } from "../events/events";
 
 export const usePromptStore = defineStore("prompt", () => {
   // ─── Estado ───────────────────────────────────────────────────────────────
   const tasks = ref([]);
   const currentTask = ref(null);
   const promptText = ref("");
-
-  // Array de slots de media para la tarea activa.
-  // Cada slot: { url_post: string, url_video: string, width: number|null, height: number|null }
-  // Siempre tiene al menos un elemento.
   const mediaList = ref([
     { url_post: "", url_video: "", width: null, height: null },
   ]);
 
   let saveTimeout = null;
 
+  // Versión de carga: se incrementa en cada loadTask/realtime. scheduleSave
+  // captura el valor en el closure del setTimeout y lo compara al expirar;
+  // si cambió, descarta el save. Esto resuelve el race condition que un
+  // booleano isRestoring no puede manejar, dado que los watchers de Vue son
+  // microtasks asíncronas y llegan después de que el booleano ya volvió a false.
+  let restoreVersion = 0;
+
+  // Referencia lazy al syncStore para evitar dependencia circular en imports.
+  // Se resuelve en runtime, cuando Pinia ya tiene ambos stores montados.
+  const getSync = () => useSyncStore();
+
   // ─── Helpers internos ─────────────────────────────────────────────────────
 
-  /** Serializa mediaList a objeto plano seguro para Dexie (sin Proxies Vue) */
   const serializeMedia = () =>
     mediaList.value.map((m) => ({
       url_post: m.url_post || "",
@@ -29,18 +36,6 @@ export const usePromptStore = defineStore("prompt", () => {
       height: m.height || null,
     }));
 
-  /** Devuelve el nombre de la tabla según si hay sesión activa o no */
-  const getTable = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    return session ? "tasks_auth" : "tasks_local";
-  };
-
-  /**
-   * Construye el objeto plano que se persiste en Dexie.
-   * Usa JSON.parse/stringify para eliminar Proxies de Vue.
-   */
   const buildTaskPayload = (task, media) =>
     JSON.parse(
       JSON.stringify({
@@ -54,59 +49,99 @@ export const usePromptStore = defineStore("prompt", () => {
     );
 
   /**
-   * Persiste currentTask con los valores actuales de promptText y mediaList,
-   * y sincroniza el array tasks[] en memoria.
+   * Persiste currentTask en IndexedDB y dispara sync a Supabase.
+   * El sync es fire-and-forget: la UI nunca espera la red.
    */
   const persistCurrentTask = async () => {
     if (!currentTask.value) return;
 
-    const tableName = await getTable();
     const media = serializeMedia();
-
     currentTask.value.prompt = promptText.value;
     currentTask.value.media = media;
     currentTask.value.updatedAt = Date.now();
 
     const payload = buildTaskPayload(currentTask.value, media);
-    await db[tableName].put(payload);
+
+    await db.tasks.put(payload);
 
     const index = tasks.value.findIndex((t) => t.id === currentTask.value.id);
     if (index !== -1) tasks.value[index] = { ...currentTask.value };
+
+    getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
   };
 
   // ─── Auto-guardado ────────────────────────────────────────────────────────
-  // Los watchers van dentro del store. Pinia los registra correctamente
-  // y los mantiene activos mientras el store exista (toda la vida de la app).
 
   const scheduleSave = () => {
     if (!currentTask.value) return;
     clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(persistCurrentTask, 500);
+    const versionAtSchedule = restoreVersion;
+    saveTimeout = setTimeout(() => {
+      if (restoreVersion !== versionAtSchedule) return;
+      persistCurrentTask();
+    }, 2000);
   };
 
   watch(promptText, scheduleSave);
   watch(mediaList, scheduleSave, { deep: true });
 
-  // ─── Actions ──────────────────────────────────────────────────────────────
+  // ─── Init ─────────────────────────────────────────────────────────────────
 
   const init = async () => {
     await initDB();
+    await loadTasks();
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session) {
-      await loadTasks();
-    }
-
-    window.addEventListener("user-signed-out", clearLocalData);
-    window.addEventListener("data-restored", reloadTasks);
-    window.addEventListener("create-default-task", createNewTask);
+    window.addEventListener(APP_EVENTS.SIGNED_OUT, clearLocalData);
+    window.addEventListener(APP_EVENTS.DATA_RESTORED, loadTasks);
+    window.addEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
+    window.addEventListener(APP_EVENTS.REALTIME_CHANGE, handleRealtimeChange);
   };
+
+  // ─── Realtime handler ─────────────────────────────────────────────────────
+
+  const handleRealtimeChange = async () => {
+    const allTasks = await db.tasks.orderBy("updatedAt").reverse().toArray();
+    const normalized = allTasks.map(normalizeTask);
+    tasks.value.splice(0, tasks.value.length, ...normalized);
+
+    if (!currentTask.value) return;
+
+    const updated = tasks.value.find((t) => t.id === currentTask.value.id);
+
+    if (updated) {
+      const prevUpdatedAt = currentTask.value.updatedAt;
+      const prevPrompt = currentTask.value.prompt;
+      const prevMedia = JSON.stringify(currentTask.value.media);
+      currentTask.value = updated;
+
+      // Comparar contenido, no solo updatedAt: los relojes entre dispositivos
+      // pueden diferir en segundos y romper la comparación por timestamp solo.
+      const contentChanged =
+        updated.updatedAt > prevUpdatedAt ||
+        updated.prompt !== prevPrompt ||
+        JSON.stringify(updated.media) !== prevMedia;
+
+      if (contentChanged) {
+        restoreVersion++;
+        promptText.value = updated.prompt;
+        mediaList.value = updated.media.map((m) => ({ ...m }));
+      }
+    } else {
+      // La tarea activa fue eliminada desde otro dispositivo
+      if (tasks.value.length > 0) {
+        await loadTask(tasks.value[0]);
+      } else {
+        await createNewTask();
+      }
+    }
+  };
+
+  // ─── Limpiar datos al cerrar sesión ───────────────────────────────────────
 
   const clearLocalData = async () => {
     try {
-      await db.tasks_auth.clear();
+      // IndexedDB ya fue limpiado por useSyncStore en handleSignOut.
+      // Aquí solo reseteamos el estado en memoria.
       tasks.value = [];
       currentTask.value = null;
       promptText.value = "";
@@ -114,56 +149,42 @@ export const usePromptStore = defineStore("prompt", () => {
         { url_post: "", url_video: "", width: null, height: null },
       ];
     } catch (error) {
-      console.error("Error limpiando datos de sesión:", error);
+      console.error("Error limpiando datos:", error);
     }
   };
 
-  const loadTasks = async (skipIfEmpty = false) => {
+  // ─── Carga de tareas ──────────────────────────────────────────────────────
+
+  const loadTasks = async () => {
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      let tableName;
-
-      if (session) {
-        tableName = "tasks_auth";
-      } else {
-        tableName = "tasks_local";
-        const authTasksCount = await db.tasks_auth.count();
-        if (authTasksCount > 0) {
-          console.warn("Datos huérfanos en tasks_auth detectados — limpiando");
-          await db.tasks_auth.clear();
-        }
-      }
-
-      const allTasks = await db[tableName]
-        .orderBy("updatedAt")
-        .reverse()
-        .toArray();
-
+      const allTasks = await db.tasks.orderBy("updatedAt").reverse().toArray();
       tasks.value = allTasks.map(normalizeTask);
 
       if (tasks.value.length > 0) {
         await loadTask(tasks.value[0]);
-      } else if (!skipIfEmpty) {
+      } else {
         await createNewTask();
       }
     } catch (error) {
       console.error("Error cargando tareas:", error);
-      if (!skipIfEmpty) await createNewTask();
+      await createNewTask();
     }
   };
 
+  // ─── CRUD ─────────────────────────────────────────────────────────────────
+
   const createNewTask = async () => {
     try {
-      const tableName = await getTable();
       const newTask = new Task({
         name: "Nueva Tarea",
         prompt: "Escribe tu prompt aquí.",
       });
-      await db[tableName].add(newTask);
+
+      await db.tasks.add(newTask);
       tasks.value.unshift(newTask);
       await loadTask(newTask);
+      getSync().syncTaskToSupabase(newTask, SYNC_OPERATIONS.UPSERT);
+
       return newTask;
     } catch (error) {
       console.error("Error creando tarea:", error);
@@ -173,17 +194,10 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const loadTask = async (task) => {
     const normalized = normalizeTask(task);
+    restoreVersion++;
     currentTask.value = normalized;
     promptText.value = normalized.prompt;
     mediaList.value = normalized.media.map((m) => ({ ...m }));
-  };
-
-  const saveCurrentTask = async () => {
-    try {
-      await persistCurrentTask();
-    } catch (error) {
-      console.error("Error guardando tarea:", error);
-    }
   };
 
   const updateTaskName = async (name) => {
@@ -191,7 +205,8 @@ export const usePromptStore = defineStore("prompt", () => {
     try {
       currentTask.value.name = name;
       currentTask.value.updatedAt = Date.now();
-      await persistCurrentTask();
+      // scheduleSave agrupa keystrokes en una sola operación debounced
+      scheduleSave();
     } catch (error) {
       console.error("Error actualizando nombre:", error);
     }
@@ -199,11 +214,16 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const deleteTask = async (taskId) => {
     try {
-      const tableName = await getTable();
-      await db[tableName].delete(taskId);
+      const taskToDelete = tasks.value.find((t) => t.id === taskId);
+
+      await db.tasks.delete(taskId);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) tasks.value.splice(index, 1);
+
+      if (taskToDelete) {
+        getSync().syncTaskToSupabase(taskToDelete, SYNC_OPERATIONS.DELETE);
+      }
 
       if (currentTask.value?.id === taskId) {
         if (tasks.value.length > 0) {
@@ -219,9 +239,16 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const deleteAllTasks = async () => {
     try {
-      const tableName = await getTable();
-      await db[tableName].clear();
+      const allTasks = await db.tasks.toArray();
+
+      await db.tasks.clear();
       tasks.value = [];
+
+      const sync = getSync();
+      for (const task of allTasks) {
+        sync.syncTaskToSupabase(task, SYNC_OPERATIONS.DELETE);
+      }
+
       await createNewTask();
     } catch (error) {
       console.error("Error eliminando todas las tareas:", error);
@@ -231,17 +258,17 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const duplicateTask = async (task) => {
     try {
-      const tableName = await getTable();
       const normalized = normalizeTask(task);
-
       const duplicate = new Task({
         name: `${normalized.name} (copia)`,
         prompt: normalized.prompt,
         media: normalized.media.map((m) => ({ ...m })),
       });
 
-      await db[tableName].add(duplicate);
+      await db.tasks.add(duplicate);
       tasks.value.unshift(duplicate);
+      getSync().syncTaskToSupabase(duplicate, SYNC_OPERATIONS.UPSERT);
+
       return duplicate;
     } catch (error) {
       console.error("Error duplicando tarea:", error);
@@ -249,15 +276,14 @@ export const usePromptStore = defineStore("prompt", () => {
     }
   };
 
+  // ─── Export / Import ──────────────────────────────────────────────────────
+
   const exportTasks = async () => {
     try {
-      const tableName = await getTable();
-      const allTasks = await db[tableName].toArray();
-
+      const allTasks = await db.tasks.toArray();
       const data = {
-        version: "3.0.0",
+        version: "4.0.0",
         exportedAt: Date.now(),
-        source: tableName,
         tasks: allTasks.map(normalizeTask),
       };
 
@@ -266,7 +292,7 @@ export const usePromptStore = defineStore("prompt", () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `prompt-tasks-${tableName}-${Date.now()}.json`;
+      link.download = `prompt-tasks-${Date.now()}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -283,15 +309,12 @@ export const usePromptStore = defineStore("prompt", () => {
       reader.onload = async (e) => {
         try {
           const data = JSON.parse(e.target.result);
-
           if (!data.tasks || !Array.isArray(data.tasks)) {
             reject(new Error("Formato de archivo inválido"));
             return;
           }
 
-          const tableName = await getTable();
           const baseId = Date.now();
-
           const newTasks = data.tasks.map((task, index) => ({
             id: baseId + index,
             name: task.name || "Tarea importada",
@@ -309,8 +332,16 @@ export const usePromptStore = defineStore("prompt", () => {
             updatedAt: task.updatedAt || Date.now(),
           }));
 
-          await db[tableName].bulkAdd(newTasks);
+          // bulkPut (upsert) evita BulkError si Realtime escribe en paralelo
+          // durante la importación.
+          await db.tasks.bulkPut(newTasks);
           tasks.value.push(...newTasks);
+
+          const sync = getSync();
+          for (const task of newTasks) {
+            sync.syncTaskToSupabase(task, SYNC_OPERATIONS.UPSERT);
+          }
+
           resolve(newTasks.length);
         } catch (error) {
           console.error("Error importando tareas:", error);
@@ -331,8 +362,7 @@ export const usePromptStore = defineStore("prompt", () => {
   ) => {
     if (index < 0 || index >= mediaList.value.length) return;
     mediaList.value[index] = { url_post, url_video, width, height };
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(saveCurrentTask, 500);
+    scheduleSave();
   };
 
   const addMediaSlot = async () => {
@@ -342,23 +372,19 @@ export const usePromptStore = defineStore("prompt", () => {
       width: null,
       height: null,
     });
-    await saveCurrentTask();
+    await persistCurrentTask();
   };
 
   const removeMediaSlot = async (index) => {
     if (mediaList.value.length <= 1) return;
     mediaList.value.splice(index, 1);
-    await saveCurrentTask();
+    await persistCurrentTask();
   };
 
   const updateTaskVideoUrl = async (taskId, url_video, mediaIndex = 0) => {
     try {
-      const tableName = await getTable();
       const task = tasks.value.find((t) => t.id === taskId);
-      if (!task) {
-        console.warn(`Tarea no encontrada: ${taskId}`);
-        return;
-      }
+      if (!task) return;
 
       const normalizedTask = normalizeTask(task);
       if (!normalizedTask.media[mediaIndex]) return;
@@ -370,7 +396,8 @@ export const usePromptStore = defineStore("prompt", () => {
       normalizedTask.updatedAt = Date.now();
 
       const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
-      await db[tableName].put(payload);
+
+      await db.tasks.put(payload);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) tasks.value[index] = normalizedTask;
@@ -381,33 +408,29 @@ export const usePromptStore = defineStore("prompt", () => {
           url_video,
         };
       }
+
+      getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
     } catch (error) {
       console.error("Error actualizando URL de video:", error);
     }
   };
 
-  /**
-   * Persiste width/height de un slot cuando se descubren en runtime
-   * (videos que no tenían dimensiones en el JSON importado).
-   * No modifica updatedAt ni dispara autosave.
-   */
   const updateMediaDimensions = async (taskId, slotIndex, width, height) => {
     try {
-      const tableName = await getTable();
       const task = tasks.value.find((t) => t.id === taskId);
       if (!task) return;
 
       const normalizedTask = normalizeTask(task);
       if (!normalizedTask.media[slotIndex]) return;
 
-      // Si ya tiene los mismos valores no hacemos nada
       const slot = normalizedTask.media[slotIndex];
       if (slot.width === width && slot.height === height) return;
 
       normalizedTask.media[slotIndex] = { ...slot, width, height };
 
       const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
-      await db[tableName].put(payload);
+
+      await db.tasks.put(payload);
 
       const index = tasks.value.findIndex((t) => t.id === taskId);
       if (index !== -1) tasks.value[index] = normalizedTask;
@@ -419,34 +442,36 @@ export const usePromptStore = defineStore("prompt", () => {
           height,
         };
       }
+
+      // updatedAt no cambia: las dimensiones son metadatos de runtime
+      getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
     } catch (error) {
       console.error("Error guardando dimensiones:", error);
     }
   };
 
-  const reloadTasks = async () => {
-    await loadTasks();
-  };
+  // ─── Cleanup ──────────────────────────────────────────────────────────────
 
   const cleanup = () => {
-    window.removeEventListener("user-signed-out", clearLocalData);
-    window.removeEventListener("data-restored", reloadTasks);
-    window.removeEventListener("create-default-task", createNewTask);
+    window.removeEventListener(APP_EVENTS.SIGNED_OUT, clearLocalData);
+    window.removeEventListener(APP_EVENTS.DATA_RESTORED, loadTasks);
+    window.removeEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
+    window.removeEventListener(
+      APP_EVENTS.REALTIME_CHANGE,
+      handleRealtimeChange,
+    );
   };
 
   return {
-    // Estado
     tasks,
     currentTask,
     promptText,
     mediaList,
-    // Actions
     init,
     clearLocalData,
     loadTasks,
     createNewTask,
     loadTask,
-    saveCurrentTask,
     updateTaskName,
     deleteTask,
     deleteAllTasks,
@@ -458,7 +483,6 @@ export const usePromptStore = defineStore("prompt", () => {
     removeMediaSlot,
     updateTaskVideoUrl,
     updateMediaDimensions,
-    reloadTasks,
     cleanup,
   };
 });

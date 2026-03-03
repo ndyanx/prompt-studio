@@ -18,7 +18,6 @@ const emit = defineEmits([
     "toggle-theme",
     "open-auth",
     "sign-out",
-    "show-tasks",
     "toggle-gallery",
 ]);
 
@@ -29,14 +28,10 @@ const {
     lastSyncTime,
     isSyncingNow,
     syncError,
-    syncSuccess,
     isOffline,
-    isThrottled,
-    throttleSecondsRemaining,
+    pendingCount,
+    hasPending,
 } = storeToRefs(syncStore);
-
-// Las acciones NO van en storeToRefs — se desestructuran directo del store.
-const { manualSync } = syncStore;
 
 const formatSyncTime = computed(() => {
     if (!lastSyncTime.value) return "Nunca";
@@ -478,6 +473,7 @@ const handleUserAction = () => {
                         </div>
 
                         <!-- Sección Sincronización -->
+                        <!-- Sección Sincronización mobile -->
                         <div v-if="user" class="sidebar-section">
                             <h3>Sincronización</h3>
                             <div class="sync-info-mobile">
@@ -485,156 +481,33 @@ const handleUserAction = () => {
                                     <strong>Última sync:</strong>
                                     {{ formatSyncTime }}
                                 </p>
-
-                                <!-- Mensaje de throttle -->
-                                <div
-                                    v-if="isThrottled && !isSyncingNow"
-                                    class="throttle-warning-mobile"
-                                >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <circle cx="12" cy="12" r="10" />
-                                        <polyline points="12 6 12 12 16 14" />
-                                    </svg>
-                                    Espera
-                                    {{ throttleSecondsRemaining }} segundos para
-                                    sincronizar nuevamente
-                                </div>
-
-                                <!-- Mensaje de conexión -->
                                 <div
                                     v-if="isOffline"
                                     class="connection-warning-mobile"
                                 >
-                                    <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path
-                                            d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                                        />
-                                        <line x1="12" y1="9" x2="12" y2="13" />
-                                        <line
-                                            x1="12"
-                                            y1="17"
-                                            x2="12.01"
-                                            y2="17"
-                                        />
-                                    </svg>
-                                    Sin conexión a internet
+                                    Sin conexión — los cambios se guardan
+                                    localmente
                                 </div>
-
-                                <!-- Mensaje de error -->
                                 <div
-                                    v-if="syncError && !isOffline"
+                                    v-if="hasPending && !isOffline"
+                                    class="throttle-warning-mobile"
+                                >
+                                    {{ pendingCount }} cambio{{
+                                        pendingCount > 1 ? "s" : ""
+                                    }}
+                                    pendiente{{ pendingCount > 1 ? "s" : "" }}
+                                </div>
+                                <div
+                                    v-if="syncError"
                                     class="sync-error-message-mobile"
                                 >
                                     {{ syncError }}
                                 </div>
-
-                                <!-- Botón de sincronizar con estados -->
-                                <button
-                                    v-if="!isSyncingNow"
-                                    @click="
-                                        manualSync();
-                                        showSidebar = false;
-                                    "
-                                    class="sync-now-btn"
-                                    :class="{
-                                        success: syncSuccess,
-                                        disabled: isOffline || isThrottled,
-                                    }"
-                                    :disabled="isOffline || isThrottled"
-                                >
-                                    <svg
-                                        v-if="
-                                            !syncSuccess &&
-                                            !isOffline &&
-                                            !isThrottled
-                                        "
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path d="M23 4v6h-6" />
-                                        <path
-                                            d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"
-                                        />
-                                    </svg>
-                                    <svg
-                                        v-else-if="!isOffline && !isThrottled"
-                                        class="checkmark-btn"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <path d="M20 6L9 17l-5-5" />
-                                    </svg>
-                                    <svg
-                                        v-else-if="isThrottled"
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <circle cx="12" cy="12" r="10" />
-                                        <polyline points="12 6 12 12 16 14" />
-                                    </svg>
-                                    <svg
-                                        v-else
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <line x1="1" y1="1" x2="23" y2="23" />
-                                        <path
-                                            d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39"
-                                        />
-                                    </svg>
-                                    {{
-                                        syncSuccess
-                                            ? "¡Sincronizado!"
-                                            : isOffline
-                                              ? "Sin conexión"
-                                              : isThrottled
-                                                ? `Espera ${throttleSecondsRemaining}s`
-                                                : "Sincronizar ahora"
-                                    }}
-                                </button>
-
-                                <!-- Mensaje de sincronizando -->
                                 <div
                                     v-if="isSyncingNow"
                                     class="syncing-message-mobile"
                                 >
-                                    Sincronizando tus datos...
+                                    Sincronizando...
                                 </div>
                             </div>
                         </div>
@@ -1111,108 +984,6 @@ const handleUserAction = () => {
     50% {
         opacity: 0.5;
     }
-}
-
-.sync-now-btn {
-    width: 100%;
-    padding: 10px;
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition:
-        background 0.2s,
-        color 0.2s,
-        border-color 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-}
-
-.sync-now-btn:hover:not(.disabled) {
-    background: var(--accent-hover);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.3);
-}
-
-.sync-now-btn:active:not(.disabled) {
-    transform: translateY(0);
-}
-
-/* Botón deshabilitado (offline o throttled) */
-.sync-now-btn.disabled {
-    background: rgba(142, 142, 147, 0.3);
-    color: var(--text-secondary);
-    cursor: not-allowed;
-    opacity: 0.6;
-}
-
-/* Botón en estado de éxito */
-.sync-now-btn.success {
-    background: #30d158;
-    animation: successBtnPulse 0.6s ease;
-}
-
-.sync-now-btn.success:hover {
-    background: #28a745;
-    box-shadow: 0 4px 12px rgba(48, 209, 88, 0.4);
-}
-
-@keyframes successBtnPulse {
-    0% {
-        transform: scale(1);
-    }
-    50% {
-        transform: scale(1.05);
-    }
-    100% {
-        transform: scale(1);
-    }
-}
-
-.checkmark-btn {
-    animation: checkmarkDraw 0.5s ease;
-}
-
-@keyframes checkmarkDraw {
-    0% {
-        stroke-dasharray: 0, 100;
-        stroke-dashoffset: 0;
-    }
-    100% {
-        stroke-dasharray: 100, 100;
-        stroke-dashoffset: 0;
-    }
-}
-
-.delete-all-mobile-btn {
-    width: 100%;
-    padding: 12px;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition:
-        background 0.2s,
-        color 0.2s,
-        border-color 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    justify-content: center;
-}
-
-.delete-all-mobile-btn:hover {
-    background: var(--hover-bg);
-    border-color: var(--accent);
-    color: var(--accent);
 }
 
 /* === SIDEBAR TRANSITIONS === */

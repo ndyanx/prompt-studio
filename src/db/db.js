@@ -23,15 +23,38 @@ db.version(2)
     }
   });
 
-// v3: agrega soporte para media como array de slots {url_post, url_video}
+// v3: soporte para media como array de slots { url_post, url_video }
 db.version(3).stores({
   tasks_local: "id, name, createdAt, updatedAt",
   tasks_auth: "id, name, createdAt, updatedAt",
   settings: "key",
 });
 
-// Normaliza cualquier tarea al formato actual.
-// Garantiza que media sea siempre un array con al menos un slot.
+// v4: tabla única tasks + cola pendingSync para operaciones offline.
+// tasks_local y tasks_auth se eliminan. user_id vive solo en Supabase.
+db.version(4)
+  .stores({
+    tasks_local: null,
+    tasks_auth: null,
+    tasks: "id, name, createdAt, updatedAt",
+    pendingSync: "++id, taskId, operation, createdAt",
+    settings: "key",
+  })
+  .upgrade(async (tx) => {
+    // Solo migramos tasks_local (anónimas).
+    // tasks_auth se descarta: al hacer login se restauran desde Supabase.
+    try {
+      const localTasks = await tx.table("tasks_local").toArray();
+      if (localTasks.length > 0) {
+        await tx.table("tasks").bulkAdd(localTasks);
+      }
+    } catch (_) {
+      // tasks_local no existía en este usuario, nada que migrar
+    }
+  });
+
+// ─── Normalización ────────────────────────────────────────────────────────────
+
 export function normalizeTask(raw) {
   return {
     ...raw,
@@ -66,12 +89,52 @@ export class Task {
   }
 }
 
-export async function migrateFromLocalStorage() {
-  const STORAGE_KEY = "prompt-studio-tasks";
+// ─── Cola de sync pendiente ───────────────────────────────────────────────────
 
+export const SYNC_OPERATIONS = {
+  UPSERT: "upsert",
+  DELETE: "delete",
+};
+
+export async function enqueuePendingSync(taskId, operation, payload = null) {
   try {
-    const existingLocalTasks = await db.tasks_local.count();
-    if (existingLocalTasks > 0) return false;
+    // Reemplazamos operaciones previas del mismo task para no acumular upserts.
+    await db.pendingSync.where("taskId").equals(taskId).delete();
+    await db.pendingSync.add({
+      taskId,
+      operation,
+      payload,
+      createdAt: Date.now(),
+    });
+  } catch (error) {
+    console.error("Error encolando sync pendiente:", error);
+  }
+}
+
+export async function getPendingSyncs() {
+  try {
+    return await db.pendingSync.orderBy("createdAt").toArray();
+  } catch (error) {
+    console.error("Error obteniendo syncs pendientes:", error);
+    return [];
+  }
+}
+
+export async function removePendingSync(id) {
+  try {
+    await db.pendingSync.delete(id);
+  } catch (error) {
+    console.error("Error eliminando sync pendiente:", error);
+  }
+}
+
+// ─── Migración desde localStorage (legacy) ───────────────────────────────────
+
+async function migrateFromLocalStorage() {
+  const STORAGE_KEY = "prompt-studio-tasks";
+  try {
+    const existingTasks = await db.tasks.count();
+    if (existingTasks > 0) return false;
 
     const stored = localStorage.getItem(STORAGE_KEY);
     if (!stored) return false;
@@ -94,13 +157,15 @@ export async function migrateFromLocalStorage() {
       return normalizeTask(base);
     });
 
-    await db.tasks_local.bulkAdd(normalized);
+    await db.tasks.bulkAdd(normalized);
     return true;
   } catch (error) {
     console.error("Error en migración desde localStorage:", error);
     return false;
   }
 }
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
 
 export async function initDB() {
   try {

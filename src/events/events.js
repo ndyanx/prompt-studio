@@ -1,12 +1,12 @@
 /**
- * Constantes de eventos globales del DOM usados para comunicación entre stores.
+ * Eventos globales del DOM para comunicación entre stores.
  *
- * Emisores → Receptores:
- *
- * SIGNED_IN    → useAuthStore (signIn)        → useSyncStore (handleSignIn)
- * SIGNED_OUT   → useAuthStore (signOut)       → useSyncStore (handleSignOut), usePromptStore (clearLocalData)
- * DATA_RESTORED → useSyncStore (handleSignIn/handleSignOut) → usePromptStore (reloadTasks)
- * CREATE_DEFAULT_TASK → useSyncStore (initSync/handleSignIn) → usePromptStore (createNewTask)
+ * Emisor              → Receptor
+ * SIGNED_IN           → useSyncStore (handleSignIn)
+ * SIGNED_OUT          → useSyncStore (handleSignOut), usePromptStore (clearLocalData)
+ * DATA_RESTORED       → usePromptStore (loadTasks)
+ * CREATE_DEFAULT_TASK → usePromptStore (createNewTask)
+ * REALTIME_CHANGE     → usePromptStore (handleRealtimeChange)
  */
 
 export const APP_EVENTS = {
@@ -14,8 +14,8 @@ export const APP_EVENTS = {
   SIGNED_OUT: "user-signed-out",
   DATA_RESTORED: "data-restored",
   CREATE_DEFAULT_TASK: "create-default-task",
+  REALTIME_CHANGE: "realtime-change",
 };
 
-/** Helper para emitir eventos sin errores de typo */
 export const emit = (eventName) =>
   window.dispatchEvent(new CustomEvent(eventName));

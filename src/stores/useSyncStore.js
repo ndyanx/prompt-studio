@@ -1,362 +1,352 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { supabase } from "../supabase/supabaseClient";
-import { db } from "../db/db";
+import {
+  db,
+  normalizeTask,
+  SYNC_OPERATIONS,
+  enqueuePendingSync,
+  getPendingSyncs,
+  removePendingSync,
+} from "../db/db";
 import { APP_EVENTS, emit } from "../events/events";
-
-const MAX_RETRIES = 3;
-const THROTTLE_TIME = 10000;
 
 export const useSyncStore = defineStore("sync", () => {
   // ─── Estado ───────────────────────────────────────────────────────────────
-  const lastSyncTime = ref(null);
+  const isOffline = ref(!navigator.onLine);
   const isSyncingNow = ref(false);
   const syncError = ref(null);
-  const syncSuccess = ref(false);
-  const isOffline = ref(!navigator.onLine);
-  const isThrottled = ref(false);
-  const throttleSecondsRemaining = ref(0);
+  const pendingCount = ref(0);
+  const lastSyncTime = ref(null);
 
-  let isSyncing = false;
-  let retryCount = 0;
-  let throttleInterval = null;
-  let isRestoringData = false;
-  const retryTimeouts = new Set();
+  let realtimeChannel = null;
+  let currentUserId = null;
+  let isHandlingSignIn = false;
 
-  // ─── Helpers internos ─────────────────────────────────────────────────────
+  // IDs de tareas escritas por este dispositivo en Supabase.
+  // Permite ignorar el eco de Realtime y evitar el loop write → realtime → write.
+  const localWriteIds = new Set();
 
-  const getOfflineError = () => {
-    if (!navigator.onLine || isOffline.value) return "Sin conexión a internet";
-    return null;
+  const hasPending = computed(() => pendingCount.value > 0);
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  const refreshPendingCount = async () => {
+    const all = await getPendingSyncs();
+    pendingCount.value = all.length;
   };
 
-  const getAuthSession = async () => {
+  const getSession = async () => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    if (!session) throw new Error("Usuario no autenticado");
     return session;
   };
 
-  const setTemporaryError = (message, ms = 3000) => {
-    syncError.value = message;
-    setTimeout(() => {
-      syncError.value = null;
-    }, ms);
-  };
+  // ─── Sync individual (fire-and-forget) ────────────────────────────────────
 
-  /** Cancela todos los retries pendientes y resetea el contador */
-  const clearPendingRetries = () => {
-    retryTimeouts.forEach(clearTimeout);
-    retryTimeouts.clear();
-    retryCount = 0;
-    isSyncing = false;
-    isSyncingNow.value = false;
-  };
+  const syncTaskToSupabase = async (
+    task,
+    operation = SYNC_OPERATIONS.UPSERT,
+  ) => {
+    const session = await getSession();
+    if (!session) return;
 
-  // ─── Actions ──────────────────────────────────────────────────────────────
-
-  const generateSnapshot = async () => {
-    try {
-      const allTasks = await db.tasks_auth.toArray();
-      const settings = await db.settings.toArray();
-
-      return {
-        version: "2.0.0",
-        timestamp: new Date().toISOString(),
-        tasks: allTasks,
-        settings,
-        stats: { totalTasks: allTasks.length },
-      };
-    } catch (error) {
-      console.error("Error generando snapshot:", error);
-      throw error;
+    if (isOffline.value) {
+      await enqueuePendingSync(task.id, operation, task);
+      await refreshPendingCount();
+      return;
     }
-  };
-
-  const startThrottle = () => {
-    isThrottled.value = true;
-    throttleSecondsRemaining.value = THROTTLE_TIME / 1000;
-
-    if (throttleInterval) clearInterval(throttleInterval);
-
-    throttleInterval = setInterval(() => {
-      throttleSecondsRemaining.value--;
-      if (throttleSecondsRemaining.value <= 0) {
-        clearInterval(throttleInterval);
-        throttleInterval = null;
-        isThrottled.value = false;
-        throttleSecondsRemaining.value = 0;
-      }
-    }, 1000);
-  };
-
-  const syncToSupabase = async (isManual = true) => {
-    if (isSyncing)
-      return { success: false, error: "Sincronización en progreso" };
-    if (!isManual)
-      return { success: false, error: "Solo sincronización manual" };
-
-    if (isThrottled.value) {
-      return {
-        success: false,
-        error: `Espera ${throttleSecondsRemaining.value} segundos`,
-        throttled: true,
-      };
-    }
-
-    const offlineError = getOfflineError();
-    if (offlineError) {
-      setTemporaryError(offlineError);
-      return { success: false, error: offlineError };
-    }
-
-    if (isManual) retryCount = 0;
-
-    isSyncing = true;
-    isSyncingNow.value = true;
-    syncError.value = null;
-    syncSuccess.value = false;
 
     try {
-      const session = await getAuthSession();
-      const snapshot = await generateSnapshot();
-
-      const { error } = await supabase.from("user_snapshots").upsert(
-        {
-          user_id: session.user.id,
-          snapshot_data: snapshot,
-          last_updated: new Date().toISOString(),
-          metadata: {
-            device: navigator.userAgent,
-            platform: navigator.platform,
-            sync_method: "manual",
+      if (operation === SYNC_OPERATIONS.DELETE) {
+        localWriteIds.add(task.id);
+        const { error } = await supabase
+          .from("tasks")
+          .delete()
+          .eq("id", task.id)
+          .eq("user_id", session.user.id);
+        if (error) throw error;
+      } else {
+        localWriteIds.add(task.id);
+        const { error } = await supabase.from("tasks").upsert(
+          {
+            id: task.id,
+            user_id: session.user.id,
+            name: task.name,
+            prompt: task.prompt,
+            media: task.media,
+            created_at: task.createdAt,
+            updated_at: task.updatedAt,
           },
-        },
-        { onConflict: "user_id" },
-      );
-
-      if (error) throw error;
-
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+      }
       lastSyncTime.value = new Date().toISOString();
-      retryCount = 0;
-      syncSuccess.value = true;
-      startThrottle();
-
-      setTimeout(() => {
-        syncSuccess.value = false;
-      }, 2000);
-
-      return { success: true, tasks: snapshot.tasks.length };
     } catch (error) {
-      console.error("Error en sync:", error);
-
-      let errorMessage = error.message;
       if (!navigator.onLine) {
-        errorMessage = "Sin conexión a internet";
-      } else if (error.message.includes("autenticado")) {
-        errorMessage = "Sesión expirada";
-      } else if (error.code === "PGRST301" || error.code === "PGRST116") {
-        errorMessage = "Error de servidor";
+        await enqueuePendingSync(task.id, operation, task);
+        await refreshPendingCount();
+      } else {
+        console.error("Error sincronizando tarea:", error);
+        syncError.value = error.message;
+        setTimeout(() => (syncError.value = null), 3000);
       }
+    }
+  };
 
-      syncError.value = errorMessage;
+  // ─── Flush cola offline ───────────────────────────────────────────────────
 
-      if (navigator.onLine && isManual && retryCount < MAX_RETRIES) {
-        retryCount++;
-        const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
-        const retryId = setTimeout(() => {
-          retryTimeouts.delete(retryId);
-          syncToSupabase(true);
-        }, delay);
-        retryTimeouts.add(retryId);
+  const flushPendingQueue = async () => {
+    const session = await getSession();
+    if (!session || isOffline.value) return;
+
+    const pending = await getPendingSyncs();
+    if (pending.length === 0) return;
+
+    isSyncingNow.value = true;
+
+    try {
+      for (const item of pending) {
+        try {
+          if (item.operation === SYNC_OPERATIONS.DELETE) {
+            localWriteIds.add(item.taskId);
+            const { error } = await supabase
+              .from("tasks")
+              .delete()
+              .eq("id", item.taskId)
+              .eq("user_id", session.user.id);
+            if (error) throw error;
+          } else {
+            if (!item.payload) {
+              await removePendingSync(item.id);
+              continue;
+            }
+            localWriteIds.add(item.payload.id);
+            const { error } = await supabase.from("tasks").upsert(
+              {
+                id: item.payload.id,
+                user_id: session.user.id,
+                name: item.payload.name,
+                prompt: item.payload.prompt,
+                media: item.payload.media,
+                created_at: item.payload.createdAt,
+                updated_at: item.payload.updatedAt,
+              },
+              { onConflict: "id" },
+            );
+            if (error) throw error;
+          }
+          await removePendingSync(item.id);
+        } catch (error) {
+          console.error("Error en flush:", error);
+          break;
+        }
       }
-
-      return { success: false, error: errorMessage };
     } finally {
-      isSyncing = false;
+      await refreshPendingCount();
+      lastSyncTime.value = new Date().toISOString();
       isSyncingNow.value = false;
     }
   };
 
-  const manualSync = () => syncToSupabase(true);
+  // ─── Carga desde Supabase ─────────────────────────────────────────────────
 
-  const restoreFromSupabase = async () => {
-    const offlineError = getOfflineError();
-    if (offlineError)
-      return { success: false, error: offlineError, offline: true };
-
+  const loadTasksFromSupabase = async (userId) => {
     try {
-      const session = await getAuthSession();
+      unsubscribeFromRealtime(); // ← pausar antes del clear
 
       const { data, error } = await supabase
-        .from("user_snapshots")
-        .select("snapshot_data")
-        .eq("user_id", session.user.id)
-        .order("last_updated", { ascending: false })
-        .limit(1)
-        .single();
+        .from("tasks")
+        .select("*")
+        .eq("user_id", userId)
+        .order("updated_at", { ascending: false });
+      if (error) throw error;
 
-      if (error) {
-        if (error.code === "PGRST116") {
-          return { success: false, message: "No hay snapshots guardados" };
-        }
-        throw error;
+      await db.tasks.clear();
+      await db.pendingSync.clear();
+
+      if (data && data.length > 0) {
+        const normalized = data.map((row) =>
+          normalizeTask({
+            id: row.id,
+            name: row.name,
+            prompt: row.prompt,
+            media: row.media,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          }),
+        );
+        // bulkPut (upsert) evita BulkError si Realtime o promptStore escribieron
+        // entre el clear() y esta línea.
+        await db.tasks.bulkPut(normalized);
+        return { success: true, count: normalized.length };
       }
-
-      if (!data)
-        return { success: false, message: "No hay snapshots guardados" };
-
-      const snapshot = data.snapshot_data;
-      await db.tasks_auth.clear();
-
-      if (snapshot.tasks?.length > 0) {
-        await db.tasks_auth.bulkAdd(snapshot.tasks);
-      }
-
-      return {
-        success: true,
-        tasks: snapshot.tasks.length,
-        timestamp: snapshot.timestamp,
-      };
+      return { success: true, count: 0 };
     } catch (error) {
-      console.error("Error restaurando snapshot:", error);
-      const offlineErr = getOfflineError();
-      if (offlineErr)
-        return { success: false, error: offlineErr, offline: true };
+      console.error("Error cargando desde Supabase:", error);
       return { success: false, error: error.message };
     }
   };
 
-  // ─── Manejadores de eventos globales ──────────────────────────────────────
+  // ─── Realtime ─────────────────────────────────────────────────────────────
 
-  const handleOnline = () => {
+  const subscribeToRealtime = (userId) => {
+    unsubscribeFromRealtime();
+    realtimeChannel = supabase
+      .channel(`tasks:${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "tasks",
+          filter: `user_id=eq.${userId}`,
+        },
+        async (payload) => {
+          await handleRealtimeChange(payload);
+        },
+      )
+      .subscribe();
+  };
+
+  const unsubscribeFromRealtime = () => {
+    if (realtimeChannel) {
+      supabase.removeChannel(realtimeChannel);
+      realtimeChannel = null;
+    }
+  };
+
+  const handleRealtimeChange = async ({
+    eventType,
+    new: newRow,
+    old: oldRow,
+  }) => {
+    try {
+      // Ignorar cambios originados por este dispositivo para evitar el loop
+      // write → Realtime → write.
+      const changedId = eventType === "DELETE" ? oldRow?.id : newRow?.id;
+      if (changedId && localWriteIds.has(changedId)) {
+        localWriteIds.delete(changedId);
+        return;
+      }
+
+      if (eventType === "DELETE") {
+        // Sin REPLICA IDENTITY FULL, Supabase solo envía la PK en oldRow.
+        if (!oldRow?.id) {
+          console.warn("Realtime DELETE recibido sin id en oldRow — ignorado");
+          return;
+        }
+        await db.tasks.delete(oldRow.id);
+      } else {
+        const normalized = normalizeTask({
+          id: newRow.id,
+          name: newRow.name,
+          prompt: newRow.prompt,
+          media: newRow.media,
+          createdAt: newRow.created_at,
+          updatedAt: newRow.updated_at,
+        });
+        await db.tasks.put(normalized);
+      }
+      emit(APP_EVENTS.REALTIME_CHANGE);
+    } catch (error) {
+      console.error("Error en Realtime:", error);
+    }
+  };
+
+  // ─── Auth handlers ────────────────────────────────────────────────────────
+
+  const handleSignIn = async () => {
+    if (isHandlingSignIn) return;
+    isHandlingSignIn = true;
+    try {
+      const session = await getSession();
+      if (!session) return;
+      currentUserId = session.user.id;
+
+      const result = await loadTasksFromSupabase(currentUserId);
+      emit(
+        result.success && result.count > 0
+          ? APP_EVENTS.DATA_RESTORED
+          : APP_EVENTS.CREATE_DEFAULT_TASK,
+      );
+
+      subscribeToRealtime(currentUserId);
+      await refreshPendingCount();
+    } catch (error) {
+      console.error("Error en handleSignIn:", error);
+      emit(APP_EVENTS.CREATE_DEFAULT_TASK);
+    } finally {
+      isHandlingSignIn = false;
+    }
+  };
+
+  const handleSignOut = async () => {
+    unsubscribeFromRealtime();
+    currentUserId = null;
+    await db.tasks.clear();
+    await db.pendingSync.clear();
+    syncError.value = null;
+    isSyncingNow.value = false;
+    lastSyncTime.value = null;
+    pendingCount.value = 0;
+    emit(APP_EVENTS.DATA_RESTORED);
+  };
+
+  // ─── Conectividad ─────────────────────────────────────────────────────────
+
+  const handleOnline = async () => {
     isOffline.value = false;
     syncError.value = null;
+    await flushPendingQueue();
   };
 
   const handleOffline = () => {
     isOffline.value = true;
   };
 
-  const handleSignOut = () => {
-    lastSyncTime.value = null;
-    syncError.value = null;
-    syncSuccess.value = false;
-    isThrottled.value = false;
-    throttleSecondsRemaining.value = 0;
-    isRestoringData = false;
-
-    // Limpia retries y estado de sync huérfanos
-    clearPendingRetries();
-
-    if (throttleInterval) {
-      clearInterval(throttleInterval);
-      throttleInterval = null;
-    }
-
-    setTimeout(() => {
-      emit(APP_EVENTS.DATA_RESTORED);
-    }, 100);
-  };
-
-  const handleSignIn = async () => {
-    if (isRestoringData) return;
-    isRestoringData = true;
-
-    // Si había retries de una sesión anterior, los cancelamos antes de restaurar
-    clearPendingRetries();
-
-    try {
-      const result = await restoreFromSupabase();
-      const hasRestoredTasks = result.success && result.tasks > 0;
-      const authTasksCount = await db.tasks_auth.count();
-
-      if (hasRestoredTasks || authTasksCount > 0) {
-        emit(APP_EVENTS.DATA_RESTORED);
-      } else {
-        emit(APP_EVENTS.CREATE_DEFAULT_TASK);
-      }
-    } catch (error) {
-      console.error("Error restaurando datos al iniciar sesión:", error);
-      const authTasksCount = await db.tasks_auth.count();
-      emit(
-        authTasksCount > 0
-          ? APP_EVENTS.DATA_RESTORED
-          : APP_EVENTS.CREATE_DEFAULT_TASK,
-      );
-    } finally {
-      setTimeout(() => {
-        isRestoringData = false;
-      }, 1000);
-    }
-  };
+  // ─── Init / Cleanup ───────────────────────────────────────────────────────
 
   const initSync = async () => {
-    try {
-      isOffline.value = !navigator.onLine;
+    isOffline.value = !navigator.onLine;
+    const session = await getSession();
 
-      // Limpia cualquier estado residual de una inicialización anterior
-      // (útil en hot-reload durante desarrollo o recargas rápidas)
-      clearPendingRetries();
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (session) {
-        await handleSignIn();
-      } else {
-        const authTasksCount = await db.tasks_auth.count();
-        if (authTasksCount > 0) {
-          console.warn(
-            `Datos huérfanos en tasks_auth (${authTasksCount} tareas) — limpiando`,
-          );
-          await db.tasks_auth.clear();
-        }
-
-        const localTasksCount = await db.tasks_local.count();
-        if (localTasksCount === 0) {
-          emit(APP_EVENTS.CREATE_DEFAULT_TASK);
-        }
-      }
-
-      window.addEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
-      window.addEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
-      window.addEventListener("online", handleOnline);
-      window.addEventListener("offline", handleOffline);
-    } catch (error) {
-      console.error("Error inicializando sync:", error);
+    if (session) {
+      currentUserId = session.user.id;
+      await handleSignIn();
+    } else {
+      await db.pendingSync.clear();
+      await refreshPendingCount();
+      const count = await db.tasks.count();
+      if (count === 0) emit(APP_EVENTS.CREATE_DEFAULT_TASK);
     }
+
+    window.addEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
+    window.addEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
   };
 
   const cleanup = () => {
-    clearPendingRetries();
-
-    if (throttleInterval) {
-      clearInterval(throttleInterval);
-      throttleInterval = null;
-    }
-
-    window.removeEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
+    unsubscribeFromRealtime();
     window.removeEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
+    window.removeEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
     window.removeEventListener("online", handleOnline);
     window.removeEventListener("offline", handleOffline);
   };
 
   return {
-    // Estado
-    lastSyncTime,
+    isOffline,
     isSyncingNow,
     syncError,
-    syncSuccess,
-    isOffline,
-    isThrottled,
-    throttleSecondsRemaining,
-    // Actions
+    pendingCount,
+    lastSyncTime,
+    hasPending,
     initSync,
-    manualSync,
-    restoreFromSupabase,
+    syncTaskToSupabase,
+    flushPendingQueue,
     cleanup,
   };
 });

@@ -70,7 +70,7 @@ const handleSignOut = async () => {
 };
 
 const handleSyncNow = async () => {
-    await syncStore.manualSync();
+    await syncStore.flushPendingQueue();
 };
 
 const handleSelectTask = (task) => {

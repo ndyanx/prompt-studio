@@ -107,7 +107,7 @@ const handleClose = () => {
                             type="email"
                             placeholder="tu@email.com"
                             required
-                            autocomplete="username"
+                            autocomplete="email"
                             :disabled="isLoading"
                         />
                     </div>
@@ -124,11 +124,7 @@ const handleClose = () => {
                                     : 'Tu contraseña'
                             "
                             required
-                            :autocomplete="
-                                isRegisterMode
-                                    ? 'new-password'
-                                    : 'current-password'
-                            "
+                            autocomplete="current-password"
                             :disabled="isLoading"
                             minlength="6"
                         />
@@ -205,6 +201,25 @@ const handleClose = () => {
                         </button>
                     </p>
                 </div>
+
+                <div v-if="isRegisterMode" class="auth-note">
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    >
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                    </svg>
+                    <p>
+                        Tu data se sincronizará automáticamente en tiempo real
+                    </p>
+                </div>
             </div>
         </div>
     </Transition>
@@ -215,6 +230,7 @@ const handleClose = () => {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.7);
+    /* backdrop-filter: blur(8px) eliminado — re-composición en cada paint */
     z-index: 2000;
     display: flex;
     align-items: center;
@@ -407,6 +423,32 @@ const handleClose = () => {
 
 .switch-mode-btn:hover {
     text-decoration: underline;
+}
+
+.auth-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(10, 132, 255, 0.1);
+    border: 1px solid rgba(10, 132, 255, 0.3);
+    border-radius: 8px;
+    color: var(--accent);
+    font-size: 13px;
+    margin-top: 20px;
+}
+
+.dark-theme .auth-note {
+    background: rgba(10, 132, 255, 0.15);
+    border-color: rgba(10, 132, 255, 0.4);
+}
+
+.auth-note svg {
+    flex-shrink: 0;
+}
+
+.auth-note p {
+    line-height: 1.4;
 }
 
 /* Animaciones */

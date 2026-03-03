@@ -87,7 +87,10 @@ const getDuplicateCount = (taskName) => {
 };
 
 const hasUrl = (task) => {
-    return !!(task.url_post || task.url_video);
+    return (
+        Array.isArray(task.media) &&
+        task.media.some((m) => m.url_post || m.url_video)
+    );
 };
 
 // Filtro separado del sort para que Vue los cachee independientemente.
@@ -137,7 +140,9 @@ const enrichedTasks = computed(() => {
         ...task,
         _dateLabel: formatDate(task.updatedAt),
         _duplicateCount: dm.get(task.name.trim()) || 0,
-        _hasUrl: !!(task.url_post || task.url_video),
+        _hasUrl:
+            Array.isArray(task.media) &&
+            task.media.some((m) => m.url_post || m.url_video),
     }));
 });
 
@@ -539,7 +544,6 @@ const pageNumbers = computed(() => {
                         <option value="created-desc">Creación reciente</option>
                         <option value="created-asc">Creación antigua</option>
                         <option value="name">Nombre (A-Z)</option>
-                        <option value="colors">Más colores</option>
                     </select>
 
                     <div class="task-actions">
