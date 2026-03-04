@@ -12,18 +12,18 @@ export const usePromptStore = defineStore("prompt", () => {
   const mediaList = ref([
     { url_post: "", url_video: "", width: null, height: null },
   ]);
+  // true una vez que init() termina — App.vue muestra los paneles reales
+  // solo cuando esto es true, previniendo CLS por datos asíncronos.
+  const isReady = ref(false);
 
   let saveTimeout = null;
 
-  // Versión de carga: se incrementa en cada loadTask/realtime. scheduleSave
-  // captura el valor en el closure del setTimeout y lo compara al expirar;
-  // si cambió, descarta el save. Esto resuelve el race condition que un
-  // booleano isRestoring no puede manejar, dado que los watchers de Vue son
-  // microtasks asíncronas y llegan después de que el booleano ya volvió a false.
+  // Versión de carga: se incrementa en cada loadTask/realtimeChange.
+  // scheduleSave captura el valor en el closure y lo compara al expirar;
+  // si cambió, descarta el save para evitar race conditions.
   let restoreVersion = 0;
 
   // Referencia lazy al syncStore para evitar dependencia circular en imports.
-  // Se resuelve en runtime, cuando Pinia ya tiene ambos stores montados.
   const getSync = () => useSyncStore();
 
   // ─── Helpers internos ─────────────────────────────────────────────────────
@@ -95,6 +95,8 @@ export const usePromptStore = defineStore("prompt", () => {
     window.addEventListener(APP_EVENTS.DATA_RESTORED, loadTasks);
     window.addEventListener(APP_EVENTS.CREATE_DEFAULT_TASK, createNewTask);
     window.addEventListener(APP_EVENTS.REALTIME_CHANGE, handleRealtimeChange);
+
+    isReady.value = true;
   };
 
   // ─── Realtime handler ─────────────────────────────────────────────────────
@@ -115,7 +117,7 @@ export const usePromptStore = defineStore("prompt", () => {
       currentTask.value = updated;
 
       // Comparar contenido, no solo updatedAt: los relojes entre dispositivos
-      // pueden diferir en segundos y romper la comparación por timestamp solo.
+      // pueden diferir y romper una comparación solo por timestamp.
       const contentChanged =
         updated.updatedAt > prevUpdatedAt ||
         updated.prompt !== prevPrompt ||
@@ -139,18 +141,14 @@ export const usePromptStore = defineStore("prompt", () => {
   // ─── Limpiar datos al cerrar sesión ───────────────────────────────────────
 
   const clearLocalData = async () => {
-    try {
-      // IndexedDB ya fue limpiado por useSyncStore en handleSignOut.
-      // Aquí solo reseteamos el estado en memoria.
-      tasks.value = [];
-      currentTask.value = null;
-      promptText.value = "";
-      mediaList.value = [
-        { url_post: "", url_video: "", width: null, height: null },
-      ];
-    } catch (error) {
-      console.error("Error limpiando datos:", error);
-    }
+    // IndexedDB ya fue limpiado por useSyncStore en handleSignOut.
+    // Aquí solo reseteamos el estado en memoria.
+    tasks.value = [];
+    currentTask.value = null;
+    promptText.value = "";
+    mediaList.value = [
+      { url_post: "", url_video: "", width: null, height: null },
+    ];
   };
 
   // ─── Carga de tareas ──────────────────────────────────────────────────────
@@ -205,7 +203,6 @@ export const usePromptStore = defineStore("prompt", () => {
     try {
       currentTask.value.name = name;
       currentTask.value.updatedAt = Date.now();
-      // scheduleSave agrupa keystrokes en una sola operación debounced
       scheduleSave();
     } catch (error) {
       console.error("Error actualizando nombre:", error);
@@ -332,8 +329,7 @@ export const usePromptStore = defineStore("prompt", () => {
             updatedAt: task.updatedAt || Date.now(),
           }));
 
-          // bulkPut (upsert) evita BulkError si Realtime escribe en paralelo
-          // durante la importación.
+          // bulkPut (upsert) evita BulkError si Realtime escribe en paralelo.
           await db.tasks.bulkPut(newTasks);
           tasks.value.push(...newTasks);
 
@@ -467,6 +463,7 @@ export const usePromptStore = defineStore("prompt", () => {
     currentTask,
     promptText,
     mediaList,
+    isReady,
     init,
     clearLocalData,
     loadTasks,

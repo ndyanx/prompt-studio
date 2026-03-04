@@ -22,9 +22,8 @@ const promptStore = usePromptStore();
 // ─── Estado local de UI ───────────────────────────────────────────────────
 const showTasks = ref(false);
 const showRandomVideo = ref(false);
-// Inicializar síncronamente antes del primer render para evitar CLS.
-// Si empieza en `false` y onMounted lo cambia a `true`, los
-// <span v-if="!isMobile"> en header-actions desaparecen post-paint.
+// Inicializado síncronamente para evitar que los <span v-if="!isMobile">
+// en los botones de acción cambien después del primer paint.
 const isMobile = ref(window.innerWidth <= 1024);
 const activeView = ref("config"); // "config" | "preview" (mobile)
 const activeMainView = ref("studio"); // "studio" | "gallery"
@@ -43,7 +42,6 @@ const debouncedCheckMobile = () => {
 };
 
 onMounted(() => {
-    checkMobile();
     window.addEventListener("resize", debouncedCheckMobile);
 });
 
@@ -82,10 +80,7 @@ const toggleMainView = () => {
         activeMainView.value === "studio" ? "gallery" : "studio";
 };
 
-/**
- * Llamado desde GalleryPanel cuando el usuario quiere ir a una tarea.
- * Carga la tarea, cambia a studio y en mobile va a config.
- */
+// Carga la tarea, cambia a studio y en mobile va a config.
 const handleGoToTask = (taskId) => {
     const task = promptStore.tasks.find((t) => t.id === taskId);
     if (task) promptStore.loadTask(task);
@@ -116,31 +111,44 @@ const showPreview = computed(
             :user="authStore.user"
             @open-auth="handleOpenAuth"
             @sign-out="handleSignOut"
-            @show-tasks="showTasks = true"
             @sync-now="handleSyncNow"
         />
 
         <div class="app-wrapper">
             <!-- Vista Studio -->
-            <ConfigPanel
-                v-show="showConfig"
-                :current-task="promptStore.currentTask"
-                :all-tasks="promptStore.tasks"
-                :is-mobile="isMobile"
-                :media-list="promptStore.mediaList"
-                :show-random-video="showRandomVideo"
-                @update-task-name="promptStore.updateTaskName"
-                @show-tasks="showTasks = true"
-                @show-random-video="showRandomVideo = true"
-                @export-tasks="promptStore.exportTasks"
-            />
+            <template v-if="promptStore.isReady">
+                <ConfigPanel
+                    v-show="showConfig"
+                    :current-task="promptStore.currentTask"
+                    :all-tasks="promptStore.tasks"
+                    :is-mobile="isMobile"
+                    :media-list="promptStore.mediaList"
+                    :show-random-video="showRandomVideo"
+                    @update-task-name="promptStore.updateTaskName"
+                    @show-tasks="showTasks = true"
+                    @show-random-video="showRandomVideo = true"
+                    @export-tasks="promptStore.exportTasks"
+                />
 
-            <PreviewPanel
-                v-show="showPreview"
-                :prompt-text="promptStore.promptText"
-                :is-mobile="isMobile"
-                @update-prompt="promptStore.promptText = $event"
-            />
+                <PreviewPanel
+                    v-show="showPreview"
+                    :prompt-text="promptStore.promptText"
+                    :is-mobile="isMobile"
+                    @update-prompt="promptStore.promptText = $event"
+                />
+            </template>
+
+            <!-- Skeleton mientras los datos cargan desde IndexedDB -->
+            <template v-else>
+                <div
+                    class="panel-skeleton config-skeleton"
+                    v-show="showConfig"
+                />
+                <div
+                    class="panel-skeleton preview-skeleton"
+                    v-show="showPreview"
+                />
+            </template>
 
             <!-- Vista Gallery -->
             <GalleryPanel
@@ -206,9 +214,33 @@ const showPreview = computed(
     overflow: hidden;
 }
 
+/* Los skeletons ocupan el mismo espacio que ConfigPanel/PreviewPanel
+   mientras isReady es false, evitando layout shift al montar los paneles. */
+.panel-skeleton {
+    background: var(--bg-primary);
+    border-right: 1px solid var(--border-color);
+}
+
+.config-skeleton {
+    flex: 0 0 60%;
+}
+
+.preview-skeleton {
+    flex: 1;
+    border-right: none;
+}
+
 @media (max-width: 1024px) {
     .app-wrapper {
         flex-direction: column;
+    }
+
+    .config-skeleton,
+    .preview-skeleton {
+        flex: 1 1 auto;
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
     }
 }
 </style>

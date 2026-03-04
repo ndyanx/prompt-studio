@@ -1301,10 +1301,6 @@ const pageNumbers = computed(() => {
     flex-shrink: 0;
 }
 
-.colors-count {
-    font-weight: 600;
-}
-
 .has-url {
     font-weight: 600;
     color: var(--accent);
@@ -1467,7 +1463,6 @@ const pageNumbers = computed(() => {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.7);
-    /* backdrop-filter: blur(8px) eliminado — misma razón que modal-overlay */
     z-index: 1100;
     display: flex;
     align-items: center;

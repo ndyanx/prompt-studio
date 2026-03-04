@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onMounted, nextTick } from "vue";
+import { computed, ref, watch, nextTick } from "vue";
 import VideoPreview from "./VideoPreview.vue";
 import { usePromptStore } from "../stores/usePromptStore";
 
@@ -25,21 +25,12 @@ const { importTasks, updateMediaSlot, addMediaSlot, removeMediaSlot } =
 const confirmDelete = ref(null);
 const confirmInput = ref("");
 
-// ─── ContentEditable para el nombre ──────────────────────────────────────
-// Usamos div[contenteditable] en lugar de textarea + auto-resize.
-// El textarea necesita resizeTextarea() en onMounted para calcular su altura
-// real via scrollHeight — eso causa un layout shift porque el elemento crece
-// DESPUÉS del primer render. Un contenteditable se expande con su contenido
-// de forma nativa, sin JS, eliminando el shift completamente.
-
 const nameEditable = ref(null);
 
 const handleNameInput = (e) => {
-    // innerText da el texto plano sin HTML — seguro para el nombre
     emit("update-task-name", e.target.innerText.replace(/\n/g, ""));
 };
 
-// Evitar saltos de línea con Enter — solo confirma/desenfoca
 const handleNameKeydown = (e) => {
     if (e.key === "Enter") {
         e.preventDefault();
@@ -47,6 +38,7 @@ const handleNameKeydown = (e) => {
     }
 };
 
+// Sincroniza el contenteditable cuando el usuario cambia de tarea.
 watch(
     () => props.currentTask?.name,
     async (newName) => {
@@ -57,12 +49,6 @@ watch(
     },
     { immediate: true },
 );
-
-onMounted(() => {
-    if (nameEditable.value && props.currentTask?.name) {
-        nameEditable.value.innerText = props.currentTask.name;
-    }
-});
 
 const requestRemoveSlot = (index) => {
     confirmDelete.value = index;
@@ -226,11 +212,10 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 <div class="title-section">
                     <div class="task-name-wrapper">
                         <div
-                            v-if="currentTask"
                             ref="nameEditable"
                             contenteditable="true"
                             class="task-name-input"
-                            :data-placeholder="'Nombre de la tarea'"
+                            :data-placeholder="'Nueva Tarea'"
                             spellcheck="false"
                             @input="handleNameInput"
                             @keydown="handleNameKeydown"
@@ -267,19 +252,18 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
         </header>
 
         <!-- Lista de slots de media -->
-        <div
-            v-show="!showAlbum"
-            class="media-list"
-            :style="{
-                visibility: confirmDelete !== null ? 'hidden' : 'visible',
-            }"
-        >
+        <div v-show="!showAlbum" class="media-list">
             <div
                 v-for="(slot, index) in mediaList"
                 :key="index"
                 class="media-slot"
             >
-                <div v-if="mediaList.length > 1" class="slot-header">
+                <div
+                    class="slot-header"
+                    :style="{
+                        visibility: mediaList.length > 1 ? 'visible' : 'hidden',
+                    }"
+                >
                     <span class="slot-label">Post {{ index + 1 }}</span>
                     <button
                         class="remove-slot-btn"
@@ -402,7 +386,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     gap: 12px;
 }
 
-/* Fila superior: badge a la izquierda, botones a la derecha */
 .header-top {
     display: flex;
     align-items: center;
@@ -450,21 +433,16 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border-color: var(--accent);
 }
 
-/* Fila inferior: nombre ocupa todo el ancho y crece hacia abajo */
 .title-section {
     min-width: 0;
 }
 
 .task-name-wrapper {
     display: flex;
-    align-items: flex-start; /* flex-start para que el badge de duplicado
-                                  se alinee arriba cuando el nombre tiene varias líneas */
+    align-items: flex-start;
     gap: 8px;
 }
 
-/* ─── ContentEditable nombre de tarea ────────────────────────────────────────
-   div[contenteditable] se expande con su contenido de forma nativa sin JS,
-   eliminando el layout shift que causaba el textarea + resizeTextarea(). */
 .task-name-input {
     font-size: 28px;
     font-weight: 600;
@@ -508,7 +486,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border: 1px solid rgba(255, 149, 0, 0.3);
     flex-shrink: 0;
     cursor: help;
-    margin-top: 6px; /* alineado verticalmente con la primera línea del nombre */
+    margin-top: 6px;
     transition:
         background 0.2s,
         border-color 0.2s;
@@ -549,7 +527,6 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     }
 }
 
-/* Media list */
 .media-list {
     display: flex;
     flex-direction: column;

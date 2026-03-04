@@ -473,7 +473,6 @@ const handleUserAction = () => {
                         </div>
 
                         <!-- Sección Sincronización -->
-                        <!-- Sección Sincronización mobile -->
                         <div v-if="user" class="sidebar-section">
                             <h3>Sincronización</h3>
                             <div class="sync-info-mobile">
