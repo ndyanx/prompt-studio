@@ -212,10 +212,11 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 <div class="title-section">
                     <div class="task-name-wrapper">
                         <div
+                            v-if="currentTask"
                             ref="nameEditable"
                             contenteditable="true"
                             class="task-name-input"
-                            :data-placeholder="'Nueva Tarea'"
+                            :data-placeholder="'Nombre de la tarea'"
                             spellcheck="false"
                             @input="handleNameInput"
                             @keydown="handleNameKeydown"
@@ -258,12 +259,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 :key="index"
                 class="media-slot"
             >
-                <div
-                    class="slot-header"
-                    :style="{
-                        visibility: mediaList.length > 1 ? 'visible' : 'hidden',
-                    }"
-                >
+                <div v-if="mediaList.length > 1" class="slot-header">
                     <span class="slot-label">Post {{ index + 1 }}</span>
                     <button
                         class="remove-slot-btn"
