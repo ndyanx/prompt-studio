@@ -45,8 +45,8 @@ const isEmpty = computed(() => allVideos.value.length === 0);
 // inmediatamente) y vamos añadiendo BATCH_SIZE más en cada frame idle
 // hasta renderizar todos. El usuario ve contenido inmediato y el resto
 // aparece suavemente mientras el browser tiene tiempo libre.
-const INITIAL_RENDER = 40; // suficiente para llenar la pantalla inicial
-const BATCH_SIZE = 60; // cuántos añadir por frame idle
+const INITIAL_RENDER = 20; // suficiente para llenar la pantalla inicial
+const BATCH_SIZE = 20; // cuántos añadir por frame idle
 const renderedCount = ref(INITIAL_RENDER);
 let idleCallbackId = null;
 
@@ -207,23 +207,36 @@ const pauseAllGridVideos = () => {
 };
 
 const resumeVisibleGridVideos = () => {
-    Object.keys(visibleMap.value).forEach((id) => {
-        videoEls[id]?.play().catch(() => {});
-    });
+    const ids = Object.keys(visibleMap.value);
+    let i = 0;
+    // Reanudar en batches idle para no bloquear el frame del click de cierre.
+    const playNext = (deadline) => {
+        while (i < ids.length && deadline.timeRemaining() > 0) {
+            videoEls[ids[i]]?.play().catch(() => {});
+            i++;
+        }
+        if (i < ids.length) requestIdleCallback(playNext);
+    };
+    requestIdleCallback(playNext);
 };
 
 const openModal = (video) => {
     modalVideo.value = video;
     document.body.style.overflow = "hidden";
-    pauseAllGridVideos();
-    nextTick(() => modalVideoRef.value?.play().catch(() => {}));
+    // Diferir al siguiente task: el browser pinta el modal primero,
+    // luego pausa los videos del grid sin bloquear el frame del click.
+    setTimeout(() => {
+        pauseAllGridVideos();
+        nextTick(() => modalVideoRef.value?.play().catch(() => {}));
+    }, 0);
 };
 
 const closeModal = () => {
     modalVideoRef.value?.pause();
     modalVideo.value = null;
     document.body.style.overflow = "";
-    resumeVisibleGridVideos();
+    // Diferir la reanudación al siguiente task idle.
+    setTimeout(() => resumeVisibleGridVideos(), 0);
 };
 
 const handleGoToTask = () => {
