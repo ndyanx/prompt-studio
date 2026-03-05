@@ -191,18 +191,37 @@ export const useSyncStore = defineStore("sync", () => {
     try {
       unsubscribeFromRealtime(); // ← pausar antes del clear
 
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("*")
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
+      // Supabase limita a 1000 filas por query por defecto.
+      // Con más de 1000 tareas, un .select() sin paginación trunca silenciosamente
+      // los resultados → loadTasksFromSupabase hace db.tasks.clear() y solo
+      // restaura las 1000 más recientes, perdiendo el resto permanentemente.
+      // La solución es paginar con .range() hasta agotar los resultados.
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let allRows = [];
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("tasks")
+          .select("*")
+          .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (error) throw error;
+
+        allRows.push(...data);
+
+        // Si la página devolvió menos filas que PAGE_SIZE, es la última
+        if (data.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
+      }
 
       await db.tasks.clear();
       await db.pendingSync.clear();
 
-      if (data && data.length > 0) {
-        const normalized = data.map((row) =>
+      if (allRows.length > 0) {
+        const normalized = allRows.map((row) =>
           normalizeTask({
             id: row.id,
             name: row.name,

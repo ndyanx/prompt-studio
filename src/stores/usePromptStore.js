@@ -212,6 +212,17 @@ export const usePromptStore = defineStore("prompt", () => {
   };
 
   const loadTask = async (task) => {
+    // Si hay un autosave pendiente para la tarea actual, ejecutarlo de forma
+    // inmediata antes de cambiar de tarea. Sin este flush, el debounce de 2s
+    // expiraría con mediaList ya reemplazada por los slots de la nueva tarea
+    // y sobreescribiría los datos de la tarea anterior con datos incorrectos,
+    // perdiendo el video u otros cambios no guardados.
+    if (saveTimeout && currentTask.value) {
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
+      await persistCurrentTask();
+    }
+
     const normalized = normalizeTask(task);
     restoreVersion++;
     currentTask.value = normalized;

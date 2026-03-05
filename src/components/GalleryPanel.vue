@@ -49,6 +49,9 @@ const INITIAL_RENDER = 20; // suficiente para llenar la pantalla inicial
 const BATCH_SIZE = 20; // cuántos añadir por frame idle
 const renderedCount = ref(INITIAL_RENDER);
 let idleCallbackId = null;
+// true después de onMounted — evita que el watch de allVideos pise
+// el columnArrays que construimos explícitamente en onMounted.
+let isMounted = false;
 
 const scheduleProgressiveRender = () => {
     if (renderedCount.value >= allVideos.value.length) return;
@@ -68,9 +71,11 @@ const scheduleProgressiveRender = () => {
 
 // Cuando cambia allVideos (nueva tarea añadida, etc.) reiniciamos
 // renderedCount Y reconstruimos columnas desde cero en un solo watch.
+// isMounted evita que este watch pise el columnArrays construido en onMounted.
 watch(
     allVideos,
     () => {
+        if (!isMounted) return;
         if (idleCallbackId) cancelIdleCallback(idleCallbackId);
         renderedCount.value = INITIAL_RENDER;
         // Rebuild inmediato de las primeras INITIAL_RENDER cards
@@ -307,16 +312,31 @@ const handleKeydown = (e) => {
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────
 onMounted(() => {
-    // Calcular colCount correcto ANTES del primer render progresivo.
-    // initResizeObserver corre en nextTick (después del primer paint),
-    // así que sin esto colCount sería 5 en pantallas pequeñas → CLS.
+    // 1. Calcular colCount correcto con clientWidth (disponible síncronamente).
     const initialWidth = document.documentElement.clientWidth;
-    colCount.value = getColsForWidth(initialWidth);
+    const initialCols = getColsForWidth(initialWidth);
 
+    // 2. Construir columnArrays directamente SIN pasar por el watch de colCount.
+    //    Si asignamos colCount.value primero, el watch dispara con columnArrays
+    //    aún vacío y con un renderedCount potencialmente stale. Construimos
+    //    el estado inicial de forma explícita y atómica.
+    colCount.value = initialCols;
+    rebuildColumns(INITIAL_RENDER, initialCols);
+
+    // 3. Arrancar el llenado progresivo desde INITIAL_RENDER.
     scheduleProgressiveRender();
     initIntersectionObserver();
     window.addEventListener("keydown", handleKeydown);
+
+    // 4. ResizeObserver en nextTick para medir el ancho real del panel
+    //    (rootRef.offsetWidth) una vez que el DOM está pintado.
+    //    Si detecta un colCount distinto al de clientWidth, el watch de colCount
+    //    reconstruirá correctamente desde renderedCount ya establecido.
     nextTick(initResizeObserver);
+
+    // 5. Activar el watch de allVideos — a partir de aquí los cambios
+    //    en tareas (nueva tarea, realtime) deben reconstruir la galería.
+    isMounted = true;
 });
 
 onUnmounted(() => {
