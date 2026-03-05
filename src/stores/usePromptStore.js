@@ -264,15 +264,13 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const deleteAllTasks = async () => {
     try {
-      const allTasks = await db.tasks.toArray();
-
       await db.tasks.clear();
       tasks.value = [];
 
-      const sync = getSync();
-      for (const task of allTasks) {
-        sync.syncTaskToSupabase(task, SYNC_OPERATIONS.DELETE);
-      }
+      // Borrar desde Supabase con paginación — garantiza que se eliminan
+      // todas las tareas incluso si IndexedDB estaba incompleto antes del
+      // fix de paginación en loadTasksFromSupabase.
+      await getSync().deleteAllFromSupabase();
 
       await createNewTask();
     } catch (error) {

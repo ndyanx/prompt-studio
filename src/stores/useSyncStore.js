@@ -185,7 +185,43 @@ export const useSyncStore = defineStore("sync", () => {
     }
   };
 
-  // ─── Carga desde Supabase ─────────────────────────────────────────────────
+  // ─── Borrar todas las tareas del usuario en Supabase ─────────────────────
+  // No usa syncTaskToSupabase en loop porque ese lee de IndexedDB, que puede
+  // estar incompleto si el usuario usó la app antes del fix de paginación.
+  // En su lugar pagina los IDs directamente desde Supabase y borra en batches.
+  const deleteAllFromSupabase = async () => {
+    const session = await getSession();
+    if (!session) return;
+
+    const PAGE_SIZE = 1000;
+    let from = 0;
+
+    while (true) {
+      // Traer solo los IDs — más liviano que traer filas completas
+      const { data, error } = await supabase
+        .from("tasks")
+        .select("id")
+        .eq("user_id", session.user.id)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      const ids = data.map((r) => r.id);
+
+      // Borrar el batch en una sola query usando .in()
+      const { error: deleteError } = await supabase
+        .from("tasks")
+        .delete()
+        .in("id", ids)
+        .eq("user_id", session.user.id);
+
+      if (deleteError) throw deleteError;
+
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+  };
 
   const loadTasksFromSupabase = async (userId) => {
     try {
@@ -400,6 +436,7 @@ export const useSyncStore = defineStore("sync", () => {
     initSync,
     syncTaskToSupabase,
     flushPendingQueue,
+    deleteAllFromSupabase,
     cleanup,
   };
 });
