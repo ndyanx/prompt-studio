@@ -53,6 +53,37 @@ db.version(4)
     }
   });
 
+// v5: migración de IDs numéricos (BIGINT) a UUID string.
+// Necesaria tras cambiar Supabase de id BIGINT a id UUID PRIMARY KEY.
+// Los registros con id numérico se reemplazan por copias con UUID nuevo.
+db.version(5)
+  .stores({
+    tasks: "id, name, createdAt, updatedAt",
+    pendingSync: "++id, taskId, operation, createdAt",
+    settings: "key",
+  })
+  .upgrade(async (tx) => {
+    try {
+      const allTasks = await tx.table("tasks").toArray();
+      const numericTasks = allTasks.filter((t) => typeof t.id === "number");
+      if (numericTasks.length === 0) return;
+
+      // Eliminar registros con ID numérico y reinsertar con UUID
+      await tx.table("tasks").bulkDelete(numericTasks.map((t) => t.id));
+      const migrated = numericTasks.map((t) => ({
+        ...t,
+        id: crypto.randomUUID(),
+      }));
+      await tx.table("tasks").bulkAdd(migrated);
+
+      // Limpiar pendingSync — los taskIds numéricos ya no son válidos.
+      // Al reconectar, useSyncStore descargará el estado desde Supabase.
+      await tx.table("pendingSync").clear();
+    } catch (_) {
+      // Si la migración falla, la app sigue funcionando con datos existentes
+    }
+  });
+
 // ─── Normalización ────────────────────────────────────────────────────────────
 
 export function normalizeTask(raw) {
@@ -72,9 +103,9 @@ export function normalizeTask(raw) {
 
 export class Task {
   constructor(data = {}) {
-    // Date.now() * 1000 + random(999) da suficiente entropía para evitar
-    // colisiones en creaciones rápidas, manteniendo BIGINT en Supabase.
-    this.id = data.id || Date.now() * 1000 + Math.floor(Math.random() * 1000);
+    // crypto.randomUUID() — UUID v4 nativo, sin colisiones entre dispositivos
+    // y compatible con id UUID PRIMARY KEY en Supabase.
+    this.id = data.id || crypto.randomUUID();
     this.name = data.name || "Nueva Tarea";
     this.prompt = data.prompt || "Escribe tu prompt aquí.";
     this.media =
@@ -135,23 +166,14 @@ export async function removePendingSync(id) {
 async function migrateFromLocalStorage() {
   const STORAGE_KEY = "prompt-studio-tasks";
   try {
-    // Ejecutar solo una vez: si ya migramos, salir inmediatamente.
-    const alreadyMigrated = await db.settings.get("ls_migration_done");
-    if (alreadyMigrated) return false;
+    const existingTasks = await db.tasks.count();
+    if (existingTasks > 0) return false;
 
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) {
-      // Marcar como migrado aunque no haya nada que migrar,
-      // para no volver a intentarlo en cada arranque.
-      await db.settings.put({ key: "ls_migration_done", value: true });
-      return false;
-    }
+    if (!stored) return false;
 
     const tasks = JSON.parse(stored);
-    if (!Array.isArray(tasks) || tasks.length === 0) {
-      await db.settings.put({ key: "ls_migration_done", value: true });
-      return false;
-    }
+    if (!Array.isArray(tasks) || tasks.length === 0) return false;
 
     const normalized = tasks.map((task) => {
       const base = {
@@ -169,7 +191,6 @@ async function migrateFromLocalStorage() {
     });
 
     await db.tasks.bulkAdd(normalized);
-    await db.settings.put({ key: "ls_migration_done", value: true });
     return true;
   } catch (error) {
     console.error("Error en migración desde localStorage:", error);

@@ -25,9 +25,28 @@ export const useSyncStore = defineStore("sync", () => {
 
   // IDs de tareas escritas por este dispositivo en Supabase.
   // Permite ignorar el eco de Realtime y evitar el loop write → realtime → write.
+  // Fix #2: TTL de 10s — si el write falla antes del echo, el ID se auto-limpia
+  // y no bloquea updates legítimos del mismo ID en el futuro.
   const localWriteIds = new Set();
+  const LOCAL_WRITE_TTL = 10_000;
+  const addLocalWriteId = (id) => {
+    localWriteIds.add(id);
+    setTimeout(() => localWriteIds.delete(id), LOCAL_WRITE_TTL);
+  };
 
   const hasPending = computed(() => pendingCount.value > 0);
+
+  // Fix #4: helper centralizado — loguea + puebla syncError para que la UI
+  // pueda mostrarlo. Se auto-limpia a los 5s para no bloquear la UI.
+  let syncErrorTimer = null;
+  const setSyncError = (msg, err) => {
+    console.error(msg, err);
+    if (syncErrorTimer) clearTimeout(syncErrorTimer);
+    syncError.value = typeof err?.message === "string" ? err.message : msg;
+    syncErrorTimer = setTimeout(() => {
+      syncError.value = null;
+    }, 5000);
+  };
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -60,7 +79,7 @@ export const useSyncStore = defineStore("sync", () => {
 
     try {
       if (operation === SYNC_OPERATIONS.DELETE) {
-        localWriteIds.add(task.id);
+        addLocalWriteId(task.id);
         const { error } = await supabase
           .from("tasks")
           .delete()
@@ -68,7 +87,7 @@ export const useSyncStore = defineStore("sync", () => {
           .eq("user_id", session.user.id);
         if (error) throw error;
       } else {
-        localWriteIds.add(task.id);
+        addLocalWriteId(task.id);
         const { error } = await supabase.from("tasks").upsert(
           {
             id: task.id,
@@ -89,14 +108,21 @@ export const useSyncStore = defineStore("sync", () => {
         await enqueuePendingSync(task.id, operation, task);
         await refreshPendingCount();
       } else {
-        console.error("Error sincronizando tarea:", error);
-        syncError.value = error.message;
-        setTimeout(() => (syncError.value = null), 3000);
+        setSyncError("Error sincronizando tarea", error);
       }
     }
   };
 
   // ─── Flush cola offline ───────────────────────────────────────────────────
+
+  // Fix #5: backoff exponencial para reintentos de flush.
+  // Si Supabase falla, esperamos 1s → 2s → 4s → … hasta MAX_BACKOFF.
+  // Evita saturar la red cuando el servidor está caído.
+  let flushBackoffDelay = 1000;
+  const MAX_FLUSH_BACKOFF = 30_000;
+  const resetFlushBackoff = () => {
+    flushBackoffDelay = 1000;
+  };
 
   const flushPendingQueue = async () => {
     const session = await getSession();
@@ -111,7 +137,7 @@ export const useSyncStore = defineStore("sync", () => {
       for (const item of pending) {
         try {
           if (item.operation === SYNC_OPERATIONS.DELETE) {
-            localWriteIds.add(item.taskId);
+            addLocalWriteId(item.taskId);
             const { error } = await supabase
               .from("tasks")
               .delete()
@@ -123,7 +149,7 @@ export const useSyncStore = defineStore("sync", () => {
               await removePendingSync(item.id);
               continue;
             }
-            localWriteIds.add(item.payload.id);
+            addLocalWriteId(item.payload.id);
             const { error } = await supabase.from("tasks").upsert(
               {
                 id: item.payload.id,
@@ -139,8 +165,16 @@ export const useSyncStore = defineStore("sync", () => {
             if (error) throw error;
           }
           await removePendingSync(item.id);
+          resetFlushBackoff(); // operación exitosa — resetear backoff
         } catch (error) {
-          console.error("Error en flush:", error);
+          setSyncError("Error en flush de cola offline", error);
+          // Backoff exponencial: programar reintento y abortar el loop actual
+          const delay = flushBackoffDelay;
+          flushBackoffDelay = Math.min(
+            flushBackoffDelay * 2,
+            MAX_FLUSH_BACKOFF,
+          );
+          setTimeout(flushPendingQueue, delay);
           break;
         }
       }
@@ -185,7 +219,7 @@ export const useSyncStore = defineStore("sync", () => {
       }
       return { success: true, count: 0 };
     } catch (error) {
-      console.error("Error cargando desde Supabase:", error);
+      setSyncError("Error cargando desde Supabase", error);
       return { success: false, error: error.message };
     }
   };
@@ -252,7 +286,7 @@ export const useSyncStore = defineStore("sync", () => {
       }
       emit(APP_EVENTS.REALTIME_CHANGE);
     } catch (error) {
-      console.error("Error en Realtime:", error);
+      setSyncError("Error en Realtime", error);
     }
   };
 
@@ -276,7 +310,7 @@ export const useSyncStore = defineStore("sync", () => {
       subscribeToRealtime(currentUserId);
       await refreshPendingCount();
     } catch (error) {
-      console.error("Error en handleSignIn:", error);
+      setSyncError("Error en handleSignIn", error);
       emit(APP_EVENTS.CREATE_DEFAULT_TASK);
     } finally {
       isHandlingSignIn = false;
@@ -310,11 +344,6 @@ export const useSyncStore = defineStore("sync", () => {
   // ─── Init / Cleanup ───────────────────────────────────────────────────────
 
   const initSync = async () => {
-    // Limpiar listeners previos antes de re-registrar.
-    // Evita acumulación de listeners duplicados si initSync se llama más de una vez
-    // (ej. hot reload en dev, o reinicialización inesperada).
-    cleanup();
-
     isOffline.value = !navigator.onLine;
     const session = await getSession();
 

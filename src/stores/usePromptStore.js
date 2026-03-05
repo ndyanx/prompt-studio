@@ -15,6 +15,15 @@ export const usePromptStore = defineStore("prompt", () => {
   // true una vez que init() termina — App.vue muestra los paneles reales
   // solo cuando esto es true, previniendo CLS por datos asíncronos.
   const isReady = ref(false);
+  // Error visible para la UI — se limpia en la siguiente operación exitosa.
+  const storeError = ref(null);
+  const setError = (msg, err) => {
+    console.error(msg, err);
+    storeError.value = msg;
+  };
+  const clearError = () => {
+    storeError.value = null;
+  };
 
   let saveTimeout = null;
 
@@ -37,16 +46,14 @@ export const usePromptStore = defineStore("prompt", () => {
     }));
 
   const buildTaskPayload = (task, media) =>
-    JSON.parse(
-      JSON.stringify({
-        id: task.id,
-        name: task.name,
-        prompt: task.prompt,
-        media,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-      }),
-    );
+    structuredClone({
+      id: task.id,
+      name: task.name,
+      prompt: task.prompt,
+      media,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+    });
 
   /**
    * Persiste currentTask en IndexedDB y dispara sync a Supabase.
@@ -68,6 +75,20 @@ export const usePromptStore = defineStore("prompt", () => {
     if (index !== -1) tasks.value[index] = { ...currentTask.value };
 
     getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
+  };
+
+  /**
+   * Fix #4: helper unificado para persistir cualquier tarea del array tasks.
+   * Evita repetir el trío db.put + tasks[index] + syncToSupabase en cada
+   * función que modifica una tarea que no es currentTask.
+   */
+  const persistTaskById = async (normalizedTask) => {
+    const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
+    await db.tasks.put(payload);
+    const index = tasks.value.findIndex((t) => t.id === normalizedTask.id);
+    if (index !== -1) tasks.value[index] = normalizedTask;
+    getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
+    return payload;
   };
 
   // ─── Auto-guardado ────────────────────────────────────────────────────────
@@ -164,7 +185,7 @@ export const usePromptStore = defineStore("prompt", () => {
         await createNewTask();
       }
     } catch (error) {
-      console.error("Error cargando tareas:", error);
+      setError("Error cargando tareas", error);
       await createNewTask();
     }
   };
@@ -185,7 +206,7 @@ export const usePromptStore = defineStore("prompt", () => {
 
       return newTask;
     } catch (error) {
-      console.error("Error creando tarea:", error);
+      setError("Error creando tarea", error);
       throw error;
     }
   };
@@ -200,13 +221,9 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const updateTaskName = async (name) => {
     if (!currentTask.value) return;
-    try {
-      currentTask.value.name = name;
-      currentTask.value.updatedAt = Date.now();
-      scheduleSave();
-    } catch (error) {
-      console.error("Error actualizando nombre:", error);
-    }
+    currentTask.value.name = name;
+    currentTask.value.updatedAt = Date.now();
+    scheduleSave();
   };
 
   const deleteTask = async (taskId) => {
@@ -230,7 +247,7 @@ export const usePromptStore = defineStore("prompt", () => {
         }
       }
     } catch (error) {
-      console.error("Error eliminando tarea:", error);
+      setError("Error eliminando tarea", error);
     }
   };
 
@@ -248,7 +265,7 @@ export const usePromptStore = defineStore("prompt", () => {
 
       await createNewTask();
     } catch (error) {
-      console.error("Error eliminando todas las tareas:", error);
+      setError("Error eliminando todas las tareas", error);
       throw error;
     }
   };
@@ -268,7 +285,7 @@ export const usePromptStore = defineStore("prompt", () => {
 
       return duplicate;
     } catch (error) {
-      console.error("Error duplicando tarea:", error);
+      setError("Error duplicando tarea", error);
       throw error;
     }
   };
@@ -295,7 +312,7 @@ export const usePromptStore = defineStore("prompt", () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Error exportando tareas:", error);
+      setError("Error exportando tareas", error);
     }
   };
 
@@ -311,9 +328,10 @@ export const usePromptStore = defineStore("prompt", () => {
             return;
           }
 
-          const baseId = Date.now();
-          const newTasks = data.tasks.map((task, index) => ({
-            id: baseId + index,
+          // Fix #6: crypto.randomUUID() nativo — evita colisiones que
+          // Date.now() + index puede generar en bulk operations rápidas.
+          const newTasks = data.tasks.map((task) => ({
+            id: crypto.randomUUID(),
             name: task.name || "Tarea importada",
             prompt: task.prompt || "",
             media:
@@ -338,9 +356,10 @@ export const usePromptStore = defineStore("prompt", () => {
             sync.syncTaskToSupabase(task, SYNC_OPERATIONS.UPSERT);
           }
 
+          clearError();
           resolve(newTasks.length);
         } catch (error) {
-          console.error("Error importando tareas:", error);
+          setError("Error importando tareas", error);
           reject(new Error(`Error al importar: ${error.message}`));
         }
       };
@@ -391,12 +410,7 @@ export const usePromptStore = defineStore("prompt", () => {
       };
       normalizedTask.updatedAt = Date.now();
 
-      const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
-
-      await db.tasks.put(payload);
-
-      const index = tasks.value.findIndex((t) => t.id === taskId);
-      if (index !== -1) tasks.value[index] = normalizedTask;
+      await persistTaskById(normalizedTask);
 
       if (currentTask.value?.id === taskId && mediaList.value[mediaIndex]) {
         mediaList.value[mediaIndex] = {
@@ -404,10 +418,8 @@ export const usePromptStore = defineStore("prompt", () => {
           url_video,
         };
       }
-
-      getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
     } catch (error) {
-      console.error("Error actualizando URL de video:", error);
+      setError("Error actualizando URL de video", error);
     }
   };
 
@@ -423,13 +435,9 @@ export const usePromptStore = defineStore("prompt", () => {
       if (slot.width === width && slot.height === height) return;
 
       normalizedTask.media[slotIndex] = { ...slot, width, height };
+      // updatedAt no cambia: las dimensiones son metadatos de runtime
 
-      const payload = buildTaskPayload(normalizedTask, normalizedTask.media);
-
-      await db.tasks.put(payload);
-
-      const index = tasks.value.findIndex((t) => t.id === taskId);
-      if (index !== -1) tasks.value[index] = normalizedTask;
+      await persistTaskById(normalizedTask);
 
       if (currentTask.value?.id === taskId && mediaList.value[slotIndex]) {
         mediaList.value[slotIndex] = {
@@ -438,11 +446,8 @@ export const usePromptStore = defineStore("prompt", () => {
           height,
         };
       }
-
-      // updatedAt no cambia: las dimensiones son metadatos de runtime
-      getSync().syncTaskToSupabase(payload, SYNC_OPERATIONS.UPSERT);
     } catch (error) {
-      console.error("Error guardando dimensiones:", error);
+      setError("Error guardando dimensiones", error);
     }
   };
 
@@ -464,6 +469,7 @@ export const usePromptStore = defineStore("prompt", () => {
     promptText,
     mediaList,
     isReady,
+    storeError,
     init,
     clearLocalData,
     loadTasks,
