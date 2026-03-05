@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 
 const props = defineProps({
     tasks: Array,
@@ -43,8 +43,27 @@ const savePaginationPreference = (value) => {
     currentPage.value = 1;
 };
 
+const handleKeydown = (e) => {
+    if (e.key === "Escape") {
+        if (showDeleteModal.value) {
+            closeDeleteModal();
+        } else if (showDeleteAllModal.value) {
+            closeDeleteAllModal();
+        } else {
+            emit("close");
+        }
+    }
+};
+
 onMounted(() => {
     loadPaginationPreference();
+    window.addEventListener("keydown", handleKeydown);
+    // Mover foco al modal para teclado y lectores de pantalla
+    document.getElementById("tasks-modal-container")?.focus();
+});
+
+onUnmounted(() => {
+    window.removeEventListener("keydown", handleKeydown);
 });
 
 // Formatea un timestamp a string legible.
@@ -458,15 +477,30 @@ const pageNumbers = computed(() => {
         </defs>
     </svg>
 
-    <div class="modal-overlay" @click="emit('close')">
-        <div class="modal-container" @click.stop>
+    <div
+        class="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="tasks-modal-title"
+        @click="emit('close')"
+    >
+        <div
+            id="tasks-modal-container"
+            class="modal-container"
+            tabindex="-1"
+            @click.stop
+        >
             <!-- Header -->
             <div class="modal-header">
                 <div class="header-left">
-                    <h2>Mis Tareas</h2>
+                    <h2 id="tasks-modal-title">Mis Tareas</h2>
                     <span class="task-count">{{ tasks.length }} tareas</span>
                 </div>
-                <button @click="emit('close')" class="close-btn" title="Cerrar">
+                <button
+                    @click="emit('close')"
+                    class="close-btn"
+                    aria-label="Cerrar panel de tareas"
+                >
                     <svg width="24" height="24"><use href="#icon-x" /></svg>
                 </button>
             </div>
@@ -480,6 +514,7 @@ const pageNumbers = computed(() => {
                     <input
                         v-model="searchQueryRaw"
                         type="text"
+                        aria-label="Buscar tareas por nombre o contenido"
                         placeholder="Buscar por nombre o contenido..."
                         class="search-input"
                     />
@@ -578,8 +613,8 @@ const pageNumbers = computed(() => {
                 :class="{ 'list-view': viewMode === 'list' }"
             >
                 <div
-                    v-for="(task, index) in paginatedTasks"
-                    :key="index"
+                    v-for="task in paginatedTasks"
+                    :key="task.id"
                     class="task-card"
                     :class="{ active: currentTask?.id === task.id }"
                 >
@@ -604,7 +639,7 @@ const pageNumbers = computed(() => {
                                 @click="emit('load-task', task)"
                                 class="icon-btn load-btn"
                                 :disabled="currentTask?.id === task.id"
-                                title="Cargar tarea"
+                                :aria-label="`Cargar tarea: ${task.name}`"
                             >
                                 <svg width="18" height="18">
                                     <use href="#icon-load" />
@@ -613,7 +648,7 @@ const pageNumbers = computed(() => {
                             <button
                                 @click="emit('duplicate-task', task)"
                                 class="icon-btn"
-                                title="Duplicar tarea"
+                                :aria-label="`Duplicar tarea: ${task.name}`"
                             >
                                 <svg width="18" height="18">
                                     <use href="#icon-duplicate" />
@@ -622,7 +657,7 @@ const pageNumbers = computed(() => {
                             <button
                                 @click="openDeleteModal(task)"
                                 class="icon-btn delete-btn"
-                                title="Eliminar tarea"
+                                :aria-label="`Eliminar tarea: ${task.name}`"
                             >
                                 <svg width="18" height="18">
                                     <use href="#icon-trash" />
@@ -678,7 +713,7 @@ const pageNumbers = computed(() => {
                         @click="prevPage"
                         :disabled="currentPage === 1"
                         class="page-btn"
-                        title="Página anterior"
+                        aria-label="Página anterior"
                     >
                         <svg width="16" height="16">
                             <use href="#icon-chevron-left" />
@@ -686,28 +721,38 @@ const pageNumbers = computed(() => {
                     </button>
 
                     <div class="page-numbers">
-                        <button
+                        <template
                             v-for="(page, index) in pageNumbers"
                             :key="index"
-                            @click="
-                                typeof page === 'number' ? goToPage(page) : null
-                            "
-                            :class="{
-                                'page-number': true,
-                                active: page === currentPage,
-                                ellipsis: page === '...',
-                            }"
-                            :disabled="page === '...'"
                         >
-                            {{ page }}
-                        </button>
+                            <span
+                                v-if="page === '...'"
+                                class="page-number ellipsis"
+                                aria-hidden="true"
+                                >…</span
+                            >
+                            <button
+                                v-else
+                                @click="goToPage(page)"
+                                :class="{
+                                    'page-number': true,
+                                    active: page === currentPage,
+                                }"
+                                :aria-label="`Ir a página ${page}`"
+                                :aria-current="
+                                    page === currentPage ? 'page' : undefined
+                                "
+                            >
+                                {{ page }}
+                            </button>
+                        </template>
                     </div>
 
                     <button
                         @click="nextPage"
                         :disabled="currentPage === totalPages"
                         class="page-btn"
-                        title="Página siguiente"
+                        aria-label="Página siguiente"
                     >
                         <svg width="16" height="16">
                             <use href="#icon-chevron-right" />
@@ -726,7 +771,13 @@ const pageNumbers = computed(() => {
 
     <!-- Modal de confirmación de eliminación individual -->
     <Transition name="delete-modal">
-        <div v-if="showDeleteModal" class="delete-modal-overlay">
+        <div
+            v-if="showDeleteModal"
+            class="delete-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-modal-title"
+        >
             <div class="delete-modal">
                 <div class="delete-modal-icon">
                     <svg width="32" height="32">
@@ -734,7 +785,9 @@ const pageNumbers = computed(() => {
                     </svg>
                 </div>
 
-                <h3 class="delete-modal-title">¿Eliminar tarea?</h3>
+                <h3 id="delete-modal-title" class="delete-modal-title">
+                    ¿Eliminar tarea?
+                </h3>
 
                 <p class="delete-modal-description">
                     Estás a punto de eliminar
@@ -773,7 +826,13 @@ const pageNumbers = computed(() => {
 
     <!-- Modal de confirmación de borrar todas las tareas -->
     <Transition name="delete-modal">
-        <div v-if="showDeleteAllModal" class="delete-modal-overlay">
+        <div
+            v-if="showDeleteAllModal"
+            class="delete-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-all-modal-title"
+        >
             <div class="delete-modal">
                 <div class="delete-modal-icon delete-all-icon">
                     <svg width="32" height="32">
@@ -781,7 +840,9 @@ const pageNumbers = computed(() => {
                     </svg>
                 </div>
 
-                <h3 class="delete-modal-title">¿Borrar todas las tareas?</h3>
+                <h3 id="delete-all-modal-title" class="delete-modal-title">
+                    ¿Borrar todas las tareas?
+                </h3>
 
                 <p class="delete-modal-description">
                     Estás a punto de

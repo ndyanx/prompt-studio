@@ -12,6 +12,7 @@ const props = defineProps({
 const emit = defineEmits(["close", "select-task"]);
 
 const currentTaskIndex = ref(0);
+const currentActiveSlot = ref(null); // slot seleccionado explícitamente en randomizeTask
 const preloadedNextIndex = ref(null);
 const preloadElement = ref(null);
 
@@ -19,11 +20,6 @@ const isRandomizing = ref(false);
 const cooldownSeconds = ref(0);
 let cooldownInterval = null;
 
-// Vue cachea este computed automáticamente por sus dependencias reactivas.
-// El cache manual anterior (tasksWithVideoCache + lastTasksLength) era código
-// de más que además tenía un bug: si el usuario editaba la URL de un video
-// (mismo número de tasks, distinto contenido) el computed devolvía el cache
-// desactualizado en lugar de recalcular.
 const tasksWithVideo = computed(() => {
     return props.tasks
         .map((task) => {
@@ -45,19 +41,26 @@ const tasksWithVideo = computed(() => {
         );
 });
 
+// currentTask ya no llama Math.random() — el slot activo se elige
+// una sola vez en randomizeTask() y se guarda en currentActiveSlot.
+// Un computed no debe tener efectos secundarios ni producir valores
+// no deterministas; hacerlo causaba que el slot cambiara de forma
+// impredecible cada vez que Vue re-evaluaba el computed.
 const currentTask = computed(() => {
     if (tasksWithVideo.value.length === 0) return null;
     const task = tasksWithVideo.value[currentTaskIndex.value];
     if (!task) return null;
+    if (!currentActiveSlot.value) return null;
+    return { ...task, _activeSlot: currentActiveSlot.value };
+});
 
+const pickRandomSlot = (task) => {
     const validSlots = task.media.filter(
         (m) => m.url_video && m.url_video.trim() !== "",
     );
     if (validSlots.length === 0) return null;
-
-    const slot = validSlots[Math.floor(Math.random() * validSlots.length)];
-    return { ...task, _activeSlot: slot };
-});
+    return validSlots[Math.floor(Math.random() * validSlots.length)];
+};
 
 const getRandomNextIndex = () => {
     if (tasksWithVideo.value.length <= 1) return null;
@@ -97,22 +100,26 @@ const randomizeTask = () => {
 
     if (tasksWithVideo.value.length === 1) {
         currentTaskIndex.value = 0;
+        currentActiveSlot.value = pickRandomSlot(tasksWithVideo.value[0]);
         return;
     }
 
     isRandomizing.value = true;
     cooldownSeconds.value = 6;
 
+    let newIndex;
     if (preloadedNextIndex.value !== null) {
-        currentTaskIndex.value = preloadedNextIndex.value;
+        newIndex = preloadedNextIndex.value;
         preloadedNextIndex.value = null;
     } else {
-        let newIndex;
         do {
             newIndex = Math.floor(Math.random() * tasksWithVideo.value.length);
         } while (newIndex === currentTaskIndex.value);
-        currentTaskIndex.value = newIndex;
     }
+
+    currentTaskIndex.value = newIndex;
+    // Elegir el slot activo aquí, una sola vez, de forma explícita
+    currentActiveSlot.value = pickRandomSlot(tasksWithVideo.value[newIndex]);
 
     cooldownInterval = setInterval(() => {
         cooldownSeconds.value--;
@@ -149,12 +156,22 @@ watch(
     { immediate: false },
 );
 
-onMounted(() => {
+onMounted(async () => {
+    window.addEventListener("keydown", handleKeydown);
     if (props.isOpen && tasksWithVideo.value.length > 0) {
+        // Diferir al siguiente task — evita que randomizeTask() bloquee
+        // el frame del click que abrió el modal (mismo patrón que TasksPanel).
+        if (typeof scheduler !== "undefined" && scheduler.yield) {
+            await scheduler.yield();
+        } else {
+            await new Promise((r) => setTimeout(r, 0));
+        }
         randomizeTask();
         window.dispatchEvent(new CustomEvent("random-modal-open"));
     }
-    window.addEventListener("keydown", handleKeydown);
+    // Mover foco al modal para teclado y lectores de pantalla
+    await nextTick();
+    document.querySelector(".random-modal-content")?.focus();
 });
 
 onUnmounted(() => {
@@ -170,8 +187,23 @@ onUnmounted(() => {
 <template>
     <Teleport to="body">
         <Transition name="modal">
-            <div v-if="isOpen" class="modal-overlay" @click="closeModal">
-                <div class="modal-content" @click.stop>
+            <div
+                v-if="isOpen"
+                class="modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                :aria-label="
+                    currentTask
+                        ? `Video aleatorio: ${currentTask.name}`
+                        : 'Video aleatorio'
+                "
+                @click="closeModal"
+            >
+                <div
+                    class="random-modal-content modal-content"
+                    tabindex="-1"
+                    @click.stop
+                >
                     <!-- Estado vacío -->
                     <div v-if="tasksWithVideo.length === 0" class="empty-state">
                         <div class="empty-icon">
@@ -208,10 +240,14 @@ onUnmounted(() => {
                                         tasksWithVideo.length <= 1 ||
                                         isRandomizing
                                     "
-                                    :title="
+                                    :aria-label="
                                         isRandomizing
-                                            ? `Espera ${cooldownSeconds}s`
+                                            ? `Espera ${cooldownSeconds} segundos`
                                             : 'Ver otro video aleatorio'
+                                    "
+                                    :aria-disabled="
+                                        tasksWithVideo.length <= 1 ||
+                                        isRandomizing
                                     "
                                 >
                                     <svg
@@ -237,7 +273,7 @@ onUnmounted(() => {
                                 <button
                                     class="modal-btn select-btn"
                                     @click="selectCurrentTask"
-                                    title="Cargar esta tarea para editar"
+                                    aria-label="Cargar esta tarea para editar"
                                 >
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"
@@ -257,7 +293,7 @@ onUnmounted(() => {
                                 <button
                                     class="modal-btn close-btn"
                                     @click="closeModal"
-                                    title="Cerrar (ESC)"
+                                    aria-label="Cerrar modal (ESC)"
                                 >
                                     <svg
                                         xmlns="http://www.w3.org/2000/svg"

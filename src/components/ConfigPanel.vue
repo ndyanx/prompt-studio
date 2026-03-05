@@ -24,8 +24,17 @@ const { importTasks, updateMediaSlot, addMediaSlot, removeMediaSlot } =
 
 const confirmDelete = ref(null);
 const confirmInput = ref("");
-
 const nameEditable = ref(null);
+const importMessage = ref(null); // { type: 'success'|'error', text: string }
+let importMessageTimer = null;
+
+const showImportMessage = (type, text) => {
+    if (importMessageTimer) clearTimeout(importMessageTimer);
+    importMessage.value = { type, text };
+    importMessageTimer = setTimeout(() => {
+        importMessage.value = null;
+    }, 4000);
+};
 
 const handleNameInput = (e) => {
     emit("update-task-name", e.target.innerText.replace(/\n/g, ""));
@@ -80,9 +89,12 @@ const handleImport = async () => {
         if (file) {
             try {
                 const count = await importTasks(file);
-                alert(`${count} tareas importadas correctamente`);
+                showImportMessage(
+                    "success",
+                    `${count} tareas importadas correctamente`,
+                );
             } catch (error) {
-                alert(error.message);
+                showImportMessage("error", error.message);
             }
         }
     };
@@ -115,12 +127,14 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 <div class="header-top">
                     <span class="badge">Dynamic Prompt Editor</span>
                     <div class="header-actions">
+                        <!-- Fix #2: aria-label siempre presente, SVG aria-hidden -->
                         <button
                             class="action-btn"
                             @click="emit('show-tasks')"
-                            title="Ver tareas"
+                            aria-label="Ver tareas"
                         >
                             <svg
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="18"
                                 height="18"
@@ -133,14 +147,17 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                                     d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"
                                 />
                             </svg>
-                            <span v-if="!isMobile">Tareas</span>
+                            <span v-if="!isMobile" aria-hidden="true"
+                                >Tareas</span
+                            >
                         </button>
                         <button
                             class="action-btn"
                             @click="emit('export-tasks')"
-                            title="Exportar tareas"
+                            aria-label="Exportar tareas"
                         >
                             <svg
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="18"
                                 height="18"
@@ -155,14 +172,17 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
-                            <span v-if="!isMobile">Exportar</span>
+                            <span v-if="!isMobile" aria-hidden="true"
+                                >Exportar</span
+                            >
                         </button>
                         <button
                             class="action-btn"
                             @click="handleImport"
-                            title="Importar tareas"
+                            aria-label="Importar tareas"
                         >
                             <svg
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="18"
                                 height="18"
@@ -177,14 +197,17 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                                 <polyline points="17 8 12 3 7 8" />
                                 <line x1="12" y1="3" x2="12" y2="15" />
                             </svg>
-                            <span v-if="!isMobile">Importar</span>
+                            <span v-if="!isMobile" aria-hidden="true"
+                                >Importar</span
+                            >
                         </button>
                         <button
                             class="action-btn album-btn"
                             @click="emit('show-random-video')"
-                            title="Ver álbum de videos"
+                            aria-label="Ver álbum de videos aleatorio"
                         >
                             <svg
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="18"
                                 height="18"
@@ -203,20 +226,39 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                                     ry="2"
                                 />
                             </svg>
-                            <span v-if="!isMobile">Random</span>
+                            <span v-if="!isMobile" aria-hidden="true"
+                                >Random</span
+                            >
                         </button>
                     </div>
                 </div>
 
+                <!-- Fix #8: toast de resultado de importación (reemplaza alert()) -->
+                <Transition name="import-toast">
+                    <div
+                        v-if="importMessage"
+                        class="import-toast"
+                        :class="importMessage.type"
+                        role="status"
+                        aria-live="polite"
+                    >
+                        {{ importMessage.text }}
+                    </div>
+                </Transition>
+
                 <!-- Fila inferior: nombre completo con crecimiento vertical -->
                 <div class="title-section">
                     <div class="task-name-wrapper">
+                        <!-- Fix #1: role=textbox + aria-label en contenteditable -->
                         <div
                             v-if="currentTask"
                             ref="nameEditable"
                             contenteditable="true"
+                            role="textbox"
+                            aria-label="Nombre de la tarea"
+                            aria-multiline="false"
                             class="task-name-input"
-                            :data-placeholder="'Nombre de la tarea'"
+          cp                  :data-placeholder="'Nombre de la tarea'"
                             spellcheck="false"
                             @input="handleNameInput"
                             @keydown="handleNameKeydown"
@@ -227,6 +269,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                             :title="`Existen ${duplicateCount} tareas con este nombre`"
                         >
                             <svg
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="14"
                                 height="14"
@@ -265,9 +308,10 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                         class="remove-slot-btn"
                         @click="requestRemoveSlot(index)"
                         :disabled="mediaList.length <= 1"
-                        title="Eliminar este post"
+                        :aria-label="`Eliminar Post ${index + 1}`"
                     >
                         <svg
+                            aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="14"
                             height="14"
@@ -293,6 +337,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 
             <button class="add-slot-btn" @click="addMediaSlot">
                 <svg
+                    aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     width="16"
                     height="16"
@@ -315,6 +360,9 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
             <div
                 v-if="confirmDelete !== null"
                 class="modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                :aria-label="`Eliminar Post ${confirmDelete + 1}`"
                 @click.self="cancelRemoveSlot"
             >
                 <div class="modal-box">
@@ -327,6 +375,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                     <input
                         v-model="confirmInput"
                         class="modal-input"
+                        aria-label='Escribe "eliminar" para confirmar'
                         placeholder='Escribe "eliminar" para confirmar'
                         @keyup.enter="confirmRemoveSlot"
                         @keyup.esc="cancelRemoveSlot"
@@ -368,6 +417,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
 
 .config-side.mobile {
     height: 100vh;
+    height: 100dvh; /* iOS Safari: excluye la barra del navegador */
     padding: 20px;
 }
 
@@ -641,7 +691,8 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
+    /* backdrop-filter eliminado — fuerza re-composición GPU en cada frame
+       del modal. El fondo semitransparente da suficiente separación visual. */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -731,8 +782,33 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
     border-color: #ff453a;
 }
 
-.modal-btn.confirm:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+/* ─── Import toast ───────────────────────────────────────────────────────── */
+.import-toast {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+}
+.import-toast.success {
+    background: rgba(48, 209, 88, 0.15);
+    color: #30d158;
+    border: 1px solid rgba(48, 209, 88, 0.3);
+}
+.import-toast.error {
+    background: rgba(255, 59, 48, 0.15);
+    color: #ff3b30;
+    border: 1px solid rgba(255, 59, 48, 0.3);
+}
+.import-toast-enter-active,
+.import-toast-leave-active {
+    transition:
+        opacity 0.25s ease,
+        transform 0.25s ease;
+}
+.import-toast-enter-from,
+.import-toast-leave-to {
+    opacity: 0;
+    transform: translateY(-6px);
 }
 </style>

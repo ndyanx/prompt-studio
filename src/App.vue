@@ -71,6 +71,29 @@ const handleSyncNow = async () => {
     await syncStore.flushPendingQueue();
 };
 
+// Diferir el mount de TasksPanel al siguiente task para que el browser
+// pinte el feedback visual del click antes de ejecutar enrichedTasks
+// (sort + map + formatDate × 1000 tareas) que bloquearía el frame.
+const handleShowTasks = async () => {
+    if (typeof scheduler !== "undefined" && scheduler.yield) {
+        await scheduler.yield();
+    } else {
+        await new Promise((r) => setTimeout(r, 0));
+    }
+    showTasks.value = true;
+};
+
+// Mismo patrón: diferir el mount de RandomVideoModal para no bloquear
+// el frame del click con tasksWithVideo computed (map + filter × 1000).
+const handleShowRandomVideo = async () => {
+    if (typeof scheduler !== "undefined" && scheduler.yield) {
+        await scheduler.yield();
+    } else {
+        await new Promise((r) => setTimeout(r, 0));
+    }
+    showRandomVideo.value = true;
+};
+
 const handleSelectTask = (task) => {
     promptStore.loadTask(task);
 };
@@ -125,8 +148,8 @@ const showPreview = computed(
                     :media-list="promptStore.mediaList"
                     :show-random-video="showRandomVideo"
                     @update-task-name="promptStore.updateTaskName"
-                    @show-tasks="showTasks = true"
-                    @show-random-video="showRandomVideo = true"
+                    @show-tasks="handleShowTasks"
+                    @show-random-video="handleShowRandomVideo"
                     @export-tasks="promptStore.exportTasks"
                 />
 

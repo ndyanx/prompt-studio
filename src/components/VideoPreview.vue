@@ -310,10 +310,14 @@ const handleVideoError = () => {
                 loop
                 muted
                 playsinline
-                preload="auto"
+                preload="metadata"
                 class="video-player"
                 controls
-                loading="lazy"
+                :style="
+                    props.width && props.height
+                        ? { aspectRatio: `${props.width} / ${props.height}` }
+                        : {}
+                "
                 @loadeddata="handleLoaded"
                 @error="handleVideoError"
             >

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { storeToRefs } from "pinia";
 import SyncStatus from "./SyncStatus.vue";
 import { useSyncStore } from "../stores/useSyncStore";
@@ -63,6 +63,15 @@ const handleUserAction = () => {
         emit("open-auth", "login");
     }
 };
+
+// Fix #2: cerrar sidebar con Escape (WCAG 2.1.2)
+const handleKeydown = (e) => {
+    if (e.key === "Escape" && showSidebar.value) {
+        showSidebar.value = false;
+    }
+};
+onMounted(() => window.addEventListener("keydown", handleKeydown));
+onUnmounted(() => window.removeEventListener("keydown", handleKeydown));
 </script>
 
 <template>
@@ -71,6 +80,7 @@ const handleUserAction = () => {
             <h1 class="app-title">
                 <span class="title-icon">
                     <svg
+                        aria-hidden="true"
                         xmlns="http://www.w3.org/2000/svg"
                         viewBox="0 0 100 100"
                         width="28"
@@ -111,12 +121,12 @@ const handleUserAction = () => {
         <div class="header-right">
             <!-- Desktop: Mostrar estado de sync y usuario -->
             <div v-if="!isMobile" class="header-actions">
-                <!-- Gallery Toggle -->
+                <!-- Fix #7: aria-label en gallery toggle -->
                 <button
                     class="gallery-toggle-btn"
                     :class="{ active: activeMainView === 'gallery' }"
                     @click="emit('toggle-gallery')"
-                    :title="
+                    :aria-label="
                         activeMainView === 'gallery'
                             ? 'Volver al Studio'
                             : 'Ver Galería'
@@ -124,6 +134,7 @@ const handleUserAction = () => {
                 >
                     <svg
                         v-if="activeMainView !== 'gallery'"
+                        aria-hidden="true"
                         xmlns="http://www.w3.org/2000/svg"
                         width="18"
                         height="18"
@@ -139,6 +150,7 @@ const handleUserAction = () => {
                     </svg>
                     <svg
                         v-else
+                        aria-hidden="true"
                         xmlns="http://www.w3.org/2000/svg"
                         width="18"
                         height="18"
@@ -151,7 +163,7 @@ const handleUserAction = () => {
                             d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"
                         />
                     </svg>
-                    <span class="gallery-btn-label">
+                    <span class="gallery-btn-label" aria-hidden="true">
                         {{
                             activeMainView === "gallery" ? "Studio" : "Galería"
                         }}
@@ -161,19 +173,20 @@ const handleUserAction = () => {
                 <!-- Sync Status Component -->
                 <SyncStatus />
 
-                <!-- User Menu -->
+                <!-- Fix #6: aria-label en user-btn -->
                 <div class="user-menu-container">
                     <button
                         class="user-btn"
                         @click="handleUserAction"
-                        :title="
+                        :aria-label="
                             user
-                                ? `Cerrar sesión (${user.email})`
+                                ? `Cerrar sesión de ${user.email}`
                                 : 'Iniciar sesión'
                         "
                     >
                         <svg
                             v-if="!user"
+                            aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="20"
                             height="20"
@@ -188,17 +201,17 @@ const handleUserAction = () => {
                             <circle cx="12" cy="7" r="4" />
                         </svg>
 
-                        <div v-else class="user-avatar">
+                        <div v-else class="user-avatar" aria-hidden="true">
                             {{ user.email.charAt(0).toUpperCase() }}
                         </div>
 
-                        <span v-if="user" class="user-email">
+                        <span v-if="user" class="user-email" aria-hidden="true">
                             {{ user.email.split("@")[0] }}
                         </span>
                     </button>
                 </div>
 
-                <!-- Theme Toggle -->
+                <!-- Theme Toggle — ya tenía aria correcto ✓ -->
                 <button
                     class="vt-switch vt-switch-appearance"
                     type="button"
@@ -215,6 +228,7 @@ const handleUserAction = () => {
                         <span class="vt-switch-icon">
                             <svg
                                 v-if="isDark"
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="14"
                                 height="14"
@@ -229,6 +243,7 @@ const handleUserAction = () => {
                             </svg>
                             <svg
                                 v-else
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="14"
                                 height="14"
@@ -267,14 +282,17 @@ const handleUserAction = () => {
                 </button>
             </div>
 
-            <!-- Mobile: Mostrar botón hamburguesa -->
+            <!-- Fix #3: hamburger con aria-label + aria-expanded + aria-controls -->
             <div v-else>
                 <button
                     class="hamburger-btn"
                     @click="showSidebar = true"
-                    title="Abrir menú"
+                    aria-label="Abrir menú de navegación"
+                    :aria-expanded="showSidebar"
+                    aria-controls="mobile-sidebar"
                 >
                     <svg
+                        aria-hidden="true"
                         xmlns="http://www.w3.org/2000/svg"
                         width="24"
                         height="24"
@@ -298,15 +316,26 @@ const handleUserAction = () => {
                 class="sidebar-overlay"
                 @click="showSidebar = false"
             >
-                <aside class="sidebar" @click.stop>
+                <!-- Fix #1: role=dialog + aria-modal + aria-labelledby -->
+                <aside
+                    id="mobile-sidebar"
+                    class="sidebar"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="sidebar-title"
+                    @click.stop
+                >
                     <div class="sidebar-header">
-                        <h2>Configuración</h2>
+                        <!-- Fix #1: id en el h2 para aria-labelledby -->
+                        <h2 id="sidebar-title">Configuración</h2>
+                        <!-- Fix #4: aria-label en close button -->
                         <button
                             class="close-sidebar-btn"
                             @click="showSidebar = false"
-                            title="Cerrar"
+                            aria-label="Cerrar menú de navegación"
                         >
                             <svg
+                                aria-hidden="true"
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="20"
                                 height="20"
@@ -330,12 +359,18 @@ const handleUserAction = () => {
                                 :class="{
                                     active: activeMainView === 'gallery',
                                 }"
+                                :aria-label="
+                                    activeMainView === 'gallery'
+                                        ? 'Volver al Studio'
+                                        : 'Ver Galería'
+                                "
                                 @click="
                                     emit('toggle-gallery');
                                     showSidebar = false;
                                 "
                             >
                                 <svg
+                                    aria-hidden="true"
                                     xmlns="http://www.w3.org/2000/svg"
                                     width="16"
                                     height="16"
@@ -373,11 +408,11 @@ const handleUserAction = () => {
                                         rx="1"
                                     />
                                 </svg>
-                                {{
+                                <span aria-hidden="true">{{
                                     activeMainView === "gallery"
                                         ? "Volver al Studio"
                                         : "Ver Galería"
-                                }}
+                                }}</span>
                             </button>
                         </div>
 
@@ -385,7 +420,10 @@ const handleUserAction = () => {
                         <div class="sidebar-section">
                             <h3>Cuenta</h3>
                             <div v-if="user" class="user-info-mobile">
-                                <div class="user-avatar-mobile">
+                                <div
+                                    class="user-avatar-mobile"
+                                    aria-hidden="true"
+                                >
                                     {{ user.email.charAt(0).toUpperCase() }}
                                 </div>
                                 <div class="user-details">
@@ -443,6 +481,7 @@ const handleUserAction = () => {
                                     <span class="vt-switch-icon">
                                         <svg
                                             v-if="isDark"
+                                            aria-hidden="true"
                                             xmlns="http://www.w3.org/2000/svg"
                                             width="14"
                                             height="14"
@@ -457,6 +496,7 @@ const handleUserAction = () => {
                                         </svg>
                                         <svg
                                             v-else
+                                            aria-hidden="true"
                                             xmlns="http://www.w3.org/2000/svg"
                                             width="14"
                                             height="14"
@@ -736,6 +776,7 @@ const handleUserAction = () => {
     width: 320px;
     max-width: 85vw;
     height: 100vh;
+    height: 100dvh; /* Fix #8: iOS Safari — excluye la barra del navegador */
     padding: 24px;
     overflow-y: auto;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.2);

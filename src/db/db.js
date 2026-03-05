@@ -72,7 +72,9 @@ export function normalizeTask(raw) {
 
 export class Task {
   constructor(data = {}) {
-    this.id = data.id || Math.floor(Date.now() + Math.random() * 1000);
+    // Date.now() * 1000 + random(999) da suficiente entropía para evitar
+    // colisiones en creaciones rápidas, manteniendo BIGINT en Supabase.
+    this.id = data.id || Date.now() * 1000 + Math.floor(Math.random() * 1000);
     this.name = data.name || "Nueva Tarea";
     this.prompt = data.prompt || "Escribe tu prompt aquí.";
     this.media =
@@ -133,14 +135,23 @@ export async function removePendingSync(id) {
 async function migrateFromLocalStorage() {
   const STORAGE_KEY = "prompt-studio-tasks";
   try {
-    const existingTasks = await db.tasks.count();
-    if (existingTasks > 0) return false;
+    // Ejecutar solo una vez: si ya migramos, salir inmediatamente.
+    const alreadyMigrated = await db.settings.get("ls_migration_done");
+    if (alreadyMigrated) return false;
 
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return false;
+    if (!stored) {
+      // Marcar como migrado aunque no haya nada que migrar,
+      // para no volver a intentarlo en cada arranque.
+      await db.settings.put({ key: "ls_migration_done", value: true });
+      return false;
+    }
 
     const tasks = JSON.parse(stored);
-    if (!Array.isArray(tasks) || tasks.length === 0) return false;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      await db.settings.put({ key: "ls_migration_done", value: true });
+      return false;
+    }
 
     const normalized = tasks.map((task) => {
       const base = {
@@ -158,6 +169,7 @@ async function migrateFromLocalStorage() {
     });
 
     await db.tasks.bulkAdd(normalized);
+    await db.settings.put({ key: "ls_migration_done", value: true });
     return true;
   } catch (error) {
     console.error("Error en migración desde localStorage:", error);

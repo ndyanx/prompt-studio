@@ -11,12 +11,13 @@ const emit = defineEmits(["change-view"]);
         @click="
             emit('change-view', activeView === 'config' ? 'preview' : 'config')
         "
-        :title="
+        :aria-label="
             activeView === 'config' ? 'Ir a Vista Previa' : 'Ir a Configuración'
         "
     >
         <svg
             v-if="activeView !== 'config'"
+            aria-hidden="true"
             xmlns="http://www.w3.org/2000/svg"
             width="24"
             height="24"
@@ -31,6 +32,7 @@ const emit = defineEmits(["change-view"]);
         </svg>
         <svg
             v-else
+            aria-hidden="true"
             xmlns="http://www.w3.org/2000/svg"
             width="24"
             height="24"
@@ -42,7 +44,7 @@ const emit = defineEmits(["change-view"]);
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
             <circle cx="12" cy="12" r="3" />
         </svg>
-        <span>{{
+        <span aria-hidden="true">{{
             activeView === "config" ? "Vista Previa" : "Configurar"
         }}</span>
     </button>
@@ -51,7 +53,9 @@ const emit = defineEmits(["change-view"]);
 <style scoped>
 .toggle-view-btn {
     position: fixed;
-    bottom: 20px;
+    bottom: calc(
+        20px + env(safe-area-inset-bottom, 0px)
+    ); /* Fix #4: iOS Safari safe area */
     right: 20px;
     background: var(--accent);
     color: white;
@@ -72,6 +76,7 @@ const emit = defineEmits(["change-view"]);
 }
 
 .toggle-view-btn:hover {
+    will-change: transform; /* Fix #3: evita crear/destruir GPU layer en cada hover */
     transform: scale(1.1);
     box-shadow: 0 6px 20px rgba(0, 113, 227, 0.6);
 }

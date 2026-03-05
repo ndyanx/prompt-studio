@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useSyncStore } from "../stores/useSyncStore";
 import { useAuthStore } from "../stores/useAuthStore";
@@ -64,19 +64,40 @@ const syncStatusText = computed(() => {
 });
 
 const showDetails = ref(false);
+
+// Fix #5: computed en lugar de función en template — evita recalcular
+// new Date() y aritmética en cada render aunque lastSyncTime no cambie.
+const formattedLastSync = computed(() => formatTime(lastSyncTime.value));
+
+// Fix #6: cerrar el panel al hacer click fuera del componente.
+const handleClickOutside = (e) => {
+    if (showDetails.value && !e.target.closest(".sync-status-container")) {
+        showDetails.value = false;
+    }
+};
+
+onMounted(() => document.addEventListener("click", handleClickOutside, true));
+onUnmounted(() =>
+    document.removeEventListener("click", handleClickOutside, true),
+);
 </script>
 
 <template>
     <div class="sync-status-container">
-        <div
+        <!-- Fix #1: div → button con aria-label, aria-expanded, aria-controls -->
+        <button
             class="sync-status"
             :class="syncStatus"
+            :aria-label="`Estado de sincronización: ${syncStatusText}. Clic para ver detalles`"
+            :aria-expanded="showDetails"
+            :aria-controls="showDetails ? 'sync-details-panel' : undefined"
             @click="showDetails = !showDetails"
-            :title="syncStatusText"
         >
+            <!-- Fix #2: aria-hidden en todos los SVGs decorativos -->
             <!-- No autenticado -->
             <svg
                 v-if="!isAuthenticated"
+                aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
                 height="16"
@@ -92,6 +113,7 @@ const showDetails = ref(false);
             <!-- Sin conexión -->
             <svg
                 v-else-if="isOffline"
+                aria-hidden="true"
                 class="wifi-off"
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
@@ -114,6 +136,7 @@ const showDetails = ref(false);
             <!-- Sincronizando -->
             <svg
                 v-else-if="isSyncingNow"
+                aria-hidden="true"
                 class="spinner"
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
@@ -129,6 +152,7 @@ const showDetails = ref(false);
             <!-- Error -->
             <svg
                 v-else-if="syncError"
+                aria-hidden="true"
                 class="shake"
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
@@ -146,6 +170,7 @@ const showDetails = ref(false);
             <!-- Pendientes -->
             <svg
                 v-else-if="hasPending"
+                aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
                 height="16"
@@ -161,6 +186,7 @@ const showDetails = ref(false);
             <!-- Al día -->
             <svg
                 v-else
+                aria-hidden="true"
                 xmlns="http://www.w3.org/2000/svg"
                 width="16"
                 height="16"
@@ -171,14 +197,27 @@ const showDetails = ref(false);
             >
                 <path d="M20 6L9 17l-5-5" />
             </svg>
-        </div>
+        </button>
 
         <Transition name="slide-fade">
-            <div v-if="showDetails" class="sync-details">
+            <!-- Fix #3: id + role="region" + aria-label en el panel -->
+            <div
+                v-if="showDetails"
+                id="sync-details-panel"
+                class="sync-details"
+                role="region"
+                aria-label="Detalles de sincronización"
+            >
                 <div class="sync-details-header">
                     <h3>Sincronización</h3>
-                    <button @click="showDetails = false" class="close-details">
+                    <!-- Fix #4: aria-label en botón cerrar -->
+                    <button
+                        @click="showDetails = false"
+                        class="close-details"
+                        aria-label="Cerrar detalles de sincronización"
+                    >
                         <svg
+                            aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="16"
                             height="16"
@@ -202,9 +241,8 @@ const showDetails = ref(false);
                     </div>
                     <div class="sync-info-item">
                         <span class="sync-label">Última sync:</span>
-                        <span class="sync-value">{{
-                            formatTime(lastSyncTime)
-                        }}</span>
+                        <!-- Fix #5: usa computed en lugar de llamar formatTime() en template -->
+                        <span class="sync-value">{{ formattedLastSync }}</span>
                     </div>
                     <div class="sync-info-item">
                         <span class="sync-label">Estado:</span>
@@ -215,6 +253,7 @@ const showDetails = ref(false);
 
                     <div v-if="isOffline" class="connection-warning">
                         <svg
+                            aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="16"
                             height="16"
@@ -238,6 +277,7 @@ const showDetails = ref(false);
                         class="pending-warning"
                     >
                         <svg
+                            aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="16"
                             height="16"
@@ -285,11 +325,20 @@ const showDetails = ref(false);
     align-items: center;
     justify-content: center;
     cursor: pointer;
+    /* Reset de estilos nativos de <button> */
+    background: transparent;
+    border: 2px solid transparent;
+    padding: 0;
+    font: inherit;
+    outline: none;
     transition:
         background 0.3s ease,
         transform 0.3s ease,
         border-color 0.3s ease;
-    border: 2px solid transparent;
+}
+.sync-status:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 .sync-status:hover {
     transform: scale(1.1);
@@ -304,12 +353,16 @@ const showDetails = ref(false);
     background: rgba(255, 149, 0, 0.2);
     color: #ff9500;
     border-color: #ff9500;
-    animation: pulse 2s infinite;
 }
 .sync-status.syncing {
     background: rgba(10, 132, 255, 0.2);
     color: var(--accent);
     border-color: var(--accent);
+}
+/* Fix #7: pulse solo en el SVG — animar el botón completo
+   saturaba el compositor con repaints del borde en cada frame */
+.sync-status.no-connection svg,
+.sync-status.syncing svg {
     animation: pulse 2s infinite;
 }
 .sync-status.error {

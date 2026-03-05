@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { useAuthStore } from "../stores/useAuthStore";
 
@@ -64,14 +64,45 @@ const switchMode = () => {
 const handleClose = () => {
     emit("close");
 };
+
+// Fix #2: cerrar modal con Escape (WCAG 2.1.2)
+const handleKeydown = (e) => {
+    if (e.key === "Escape") handleClose();
+};
+onMounted(() => window.addEventListener("keydown", handleKeydown));
+onUnmounted(() => window.removeEventListener("keydown", handleKeydown));
+
+// Fix #7: mover foco al input email al abrir (WCAG 2.4.3)
+watch(
+    () => props.isOpen,
+    async (isOpen) => {
+        if (isOpen) {
+            await nextTick();
+            document.getElementById("auth-email")?.focus();
+        }
+    },
+);
 </script>
 
 <template>
     <Transition name="modal">
         <div v-if="isOpen" class="auth-modal-overlay" @click="handleClose">
-            <div class="auth-modal" @click.stop>
-                <button class="close-btn" @click="handleClose" title="Cerrar">
+            <!-- Fix #1: role=dialog + aria-modal + aria-labelledby -->
+            <div
+                class="auth-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="auth-modal-title"
+                @click.stop
+            >
+                <!-- Fix #3: aria-label en close btn + Fix #4: aria-hidden SVG -->
+                <button
+                    class="close-btn"
+                    @click="handleClose"
+                    aria-label="Cerrar modal de autenticación"
+                >
                     <svg
+                        aria-hidden="true"
                         xmlns="http://www.w3.org/2000/svg"
                         width="24"
                         height="24"
@@ -86,7 +117,8 @@ const handleClose = () => {
                 </button>
 
                 <div class="auth-header">
-                    <h2>
+                    <!-- Fix #1: id para aria-labelledby -->
+                    <h2 id="auth-modal-title">
                         {{ isRegisterMode ? "Crear Cuenta" : "Iniciar Sesión" }}
                     </h2>
                     <p class="auth-subtitle">
@@ -100,9 +132,9 @@ const handleClose = () => {
 
                 <form @submit.prevent="handleSubmit" class="auth-form">
                     <div class="form-group">
-                        <label for="email">Email</label>
+                        <label for="auth-email">Email</label>
                         <input
-                            id="email"
+                            id="auth-email"
                             v-model="email"
                             type="email"
                             placeholder="tu@email.com"
@@ -113,9 +145,9 @@ const handleClose = () => {
                     </div>
 
                     <div class="form-group">
-                        <label for="password">Contraseña</label>
+                        <label for="auth-password">Contraseña</label>
                         <input
-                            id="password"
+                            id="auth-password"
                             v-model="password"
                             type="password"
                             :placeholder="
@@ -124,18 +156,22 @@ const handleClose = () => {
                                     : 'Tu contraseña'
                             "
                             required
-                            autocomplete="current-password"
+                            :autocomplete="
+                                isRegisterMode
+                                    ? 'new-password'
+                                    : 'current-password'
+                            "
                             :disabled="isLoading"
                             minlength="6"
                         />
                     </div>
 
                     <div v-if="isRegisterMode" class="form-group">
-                        <label for="confirmPassword"
+                        <label for="auth-confirm-password"
                             >Confirmar Contraseña</label
                         >
                         <input
-                            id="confirmPassword"
+                            id="auth-confirm-password"
                             v-model="confirmPassword"
                             type="password"
                             placeholder="Repite tu contraseña"
@@ -143,17 +179,37 @@ const handleClose = () => {
                             autocomplete="new-password"
                             :disabled="isLoading"
                             minlength="6"
+                            :aria-describedby="
+                                !passwordsMatch && confirmPassword
+                                    ? 'password-error-msg'
+                                    : undefined
+                            "
+                            :aria-invalid="
+                                !passwordsMatch && confirmPassword
+                                    ? 'true'
+                                    : undefined
+                            "
                         />
+                        <!-- Fix #5: id + role=alert para asociar error al input -->
                         <p
                             v-if="!passwordsMatch && confirmPassword"
+                            id="password-error-msg"
                             class="password-error"
+                            role="alert"
                         >
                             Las contraseñas no coinciden
                         </p>
                     </div>
 
-                    <div v-if="authError" class="auth-error">
+                    <!-- Fix #6: role=alert + aria-live para anunciar errores -->
+                    <div
+                        v-if="authError"
+                        class="auth-error"
+                        role="alert"
+                        aria-live="assertive"
+                    >
                         <svg
+                            aria-hidden="true"
                             xmlns="http://www.w3.org/2000/svg"
                             width="16"
                             height="16"
@@ -174,7 +230,11 @@ const handleClose = () => {
                         class="auth-submit-btn"
                         :disabled="!isFormValid || isLoading"
                     >
-                        <span v-if="isLoading" class="spinner"></span>
+                        <span
+                            v-if="isLoading"
+                            class="spinner"
+                            aria-label="Cargando..."
+                        ></span>
                         <span v-else>{{
                             isRegisterMode ? "Crear Cuenta" : "Iniciar Sesión"
                         }}</span>
@@ -203,7 +263,9 @@ const handleClose = () => {
                 </div>
 
                 <div v-if="isRegisterMode" class="auth-note">
+                    <!-- Fix #4: aria-hidden en SVG decorativo -->
                     <svg
+                        aria-hidden="true"
                         xmlns="http://www.w3.org/2000/svg"
                         width="16"
                         height="16"
@@ -236,7 +298,9 @@ const handleClose = () => {
     align-items: center;
     justify-content: center;
     padding: 20px;
-    animation: fadeIn 0.3s ease;
+    /* Fix #9: animation: fadeIn eliminada — Vue <Transition> ya gestiona
+       la entrada con .modal-enter-from. Tenerlas ambas causaba un flash
+       al montar por ejecutar dos animaciones simultáneas. */
 }
 
 .auth-modal {
@@ -247,7 +311,7 @@ const handleClose = () => {
     width: 100%;
     position: relative;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-    animation: slideUp 0.4s ease;
+    /* Fix #9: animation: slideUp eliminada — ídem, manejada por <Transition> */
 }
 
 .close-btn {

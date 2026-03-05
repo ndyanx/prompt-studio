@@ -43,6 +43,7 @@ body {
         Cantarell, "Helvetica Neue", sans-serif;
     background: var(--bg-primary);
     height: 100vh;
+    height: 100dvh; /* iOS Safari: excluye la barra del navegador */
     overflow: hidden;
     color: var(--text-primary);
     transition:
@@ -52,6 +53,7 @@ body {
 
 #app {
     height: 100vh;
+    height: 100dvh;
     width: 100vw;
     overflow: hidden;
 }

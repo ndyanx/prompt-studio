@@ -310,6 +310,11 @@ export const useSyncStore = defineStore("sync", () => {
   // ─── Init / Cleanup ───────────────────────────────────────────────────────
 
   const initSync = async () => {
+    // Limpiar listeners previos antes de re-registrar.
+    // Evita acumulación de listeners duplicados si initSync se llama más de una vez
+    // (ej. hot reload en dev, o reinicialización inesperada).
+    cleanup();
+
     isOffline.value = !navigator.onLine;
     const session = await getSession();
 

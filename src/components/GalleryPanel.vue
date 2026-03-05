@@ -67,26 +67,18 @@ const scheduleProgressiveRender = () => {
 };
 
 // Cuando cambia allVideos (nueva tarea añadida, etc.) reiniciamos
+// renderedCount Y reconstruimos columnas desde cero en un solo watch.
 watch(
     allVideos,
     () => {
         if (idleCallbackId) cancelIdleCallback(idleCallbackId);
         renderedCount.value = INITIAL_RENDER;
+        // Rebuild inmediato de las primeras INITIAL_RENDER cards
+        rebuildColumns(INITIAL_RENDER, colCount.value);
         scheduleProgressiveRender();
     },
     { flush: "post" },
 );
-
-// ─── Distribución horizontal en columnas ──────────────────────────────────
-const columns = computed(() => {
-    const cols = colCount.value;
-    const result = Array.from({ length: cols }, () => []);
-    // Solo distribuimos los videos ya renderizados
-    allVideos.value.slice(0, renderedCount.value).forEach((video, i) => {
-        result[i % cols].push(video);
-    });
-    return result;
-});
 
 // ─── Aspect ratio ─────────────────────────────────────────────────────────
 const runtimeRatios = ref({});
@@ -124,6 +116,43 @@ const getColsForWidth = (width) => {
     if (width < 1400) return 4;
     return 5;
 };
+
+// ─── Distribución horizontal en columnas ──────────────────────────────────
+// Reemplaza el computed columns anterior (O(n²)) por estado incremental.
+// - Cambio de colCount (resize) o de allVideos: rebuild completo.
+// - Incremento de renderedCount (progressive render): solo se distribuyen
+//   los videos nuevos — O(batch) por tick, O(n) total.
+const columnArrays = ref(Array.from({ length: colCount.value }, () => []));
+
+const rebuildColumns = (count, cols) => {
+    const result = Array.from({ length: cols }, () => []);
+    allVideos.value.slice(0, count).forEach((v, i) => result[i % cols].push(v));
+    columnArrays.value = result;
+};
+
+// Rebuild completo cuando cambia el número de columnas (resize)
+watch(
+    colCount,
+    (newCols) => {
+        rebuildColumns(renderedCount.value, newCols);
+    },
+    { flush: "post" },
+);
+
+// Solo añadir el slice nuevo cuando renderedCount incrementa
+watch(
+    renderedCount,
+    (newCount, oldCount) => {
+        if (newCount <= oldCount) return;
+        const cols = colCount.value;
+        const newVideos = allVideos.value.slice(oldCount, newCount);
+        newVideos.forEach((v, i) => {
+            columnArrays.value[(oldCount + i) % cols].push(v);
+        });
+        columnArrays.value = [...columnArrays.value];
+    },
+    { flush: "post" },
+);
 
 let resizeObserver = null;
 
@@ -203,7 +232,18 @@ const modalVideo = ref(null);
 const modalVideoRef = ref(null);
 
 const pauseAllGridVideos = () => {
-    Object.values(videoEls).forEach((el) => el?.pause());
+    const els = Object.values(videoEls);
+    let i = 0;
+    // Pausar en batches idle — simétrico con resumeVisibleGridVideos.
+    // Llamar .pause() en 50+ videos en el mismo task puede bloquear el frame.
+    const pauseNext = (deadline) => {
+        while (i < els.length && deadline.timeRemaining() > 0) {
+            els[i]?.pause();
+            i++;
+        }
+        if (i < els.length) requestIdleCallback(pauseNext);
+    };
+    requestIdleCallback(pauseNext);
 };
 
 const resumeVisibleGridVideos = () => {
@@ -220,15 +260,27 @@ const resumeVisibleGridVideos = () => {
     requestIdleCallback(playNext);
 };
 
-const openModal = (video) => {
+const openModal = async (video) => {
+    // Ceder el hilo principal antes de cualquier trabajo pesado.
+    // Esto permite que el browser pinte el feedback visual del click
+    // (hover/active state de la card) antes de montar el modal.
+    // scheduler.yield() es la API moderna; el fallback es un setTimeout(0).
+    if (typeof scheduler !== "undefined" && scheduler.yield) {
+        await scheduler.yield();
+    } else {
+        await new Promise((r) => setTimeout(r, 0));
+    }
+
     modalVideo.value = video;
     document.body.style.overflow = "hidden";
-    // Diferir al siguiente task: el browser pinta el modal primero,
-    // luego pausa los videos del grid sin bloquear el frame del click.
-    setTimeout(() => {
-        pauseAllGridVideos();
-        nextTick(() => modalVideoRef.value?.play().catch(() => {}));
-    }, 0);
+
+    // Esperar a que Vue monte el modal antes de interactuar con el video.
+    await nextTick();
+    // Mover el foco al modal — necesario para teclado y lectores de pantalla.
+    document.querySelector(".modal-content")?.focus();
+    // Pausar videos del grid en idle — no bloquea el frame de apertura.
+    pauseAllGridVideos();
+    modalVideoRef.value?.play().catch(() => {});
 };
 
 const closeModal = () => {
@@ -255,6 +307,12 @@ const handleKeydown = (e) => {
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────
 onMounted(() => {
+    // Calcular colCount correcto ANTES del primer render progresivo.
+    // initResizeObserver corre en nextTick (después del primer paint),
+    // así que sin esto colCount sería 5 en pantallas pequeñas → CLS.
+    const initialWidth = document.documentElement.clientWidth;
+    colCount.value = getColsForWidth(initialWidth);
+
     scheduleProgressiveRender();
     initIntersectionObserver();
     window.addEventListener("keydown", handleKeydown);
@@ -303,7 +361,7 @@ onUnmounted(() => {
             :class="{ 'modal-open': modalVideo }"
         >
             <div
-                v-for="(col, colIndex) in columns"
+                v-for="(col, colIndex) in columnArrays"
                 :key="colIndex"
                 class="gallery-column"
             >
@@ -313,8 +371,13 @@ onUnmounted(() => {
                     :ref="(el) => setCardRef(el, video.id)"
                     :data-videoid="video.id"
                     class="gallery-card"
+                    role="button"
+                    :tabindex="0"
+                    :aria-label="`Ver video: ${video.taskName}`"
                     :style="{ aspectRatio: getCardAspect(video) }"
                     @click="openModal(video)"
+                    @keydown.enter.prevent="openModal(video)"
+                    @keydown.space.prevent="openModal(video)"
                 >
                     <video
                         v-if="isVisible(video.id)"
@@ -351,9 +414,12 @@ onUnmounted(() => {
             <div
                 v-if="modalVideo"
                 class="modal-overlay"
+                role="dialog"
+                aria-modal="true"
+                :aria-label="`Video: ${modalVideo.taskName}`"
                 @click="handleModalOverlayClick"
             >
-                <div class="modal-content">
+                <div class="modal-content" tabindex="-1">
                     <div class="modal-header">
                         <span class="modal-task-name">{{
                             modalVideo.taskName
@@ -381,6 +447,7 @@ onUnmounted(() => {
                             <button
                                 class="modal-btn close-btn"
                                 @click="closeModal"
+                                aria-label="Cerrar modal"
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -513,17 +580,21 @@ onUnmounted(() => {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     flex-shrink: 0;
-    /*
-       will-change promueve cada card a su propia capa de composición.
-       El hover:scale no afecta al layout de sus hermanos y el browser
-       no necesita recalcular paint para el resto del grid.
-    */
-    will-change: transform;
     transition:
         transform 0.2s ease,
         box-shadow 0.2s ease;
+    /*
+       will-change removido de aquí: promover TODAS las cards permanentemente
+       a capas GPU propias satura la memoria de composición del browser.
+       Solo se activa en hover (ver abajo).
+    */
 }
 .gallery-card:hover {
+    /*
+       will-change en hover: la capa GPU se crea justo antes de la animación
+       y se destruye cuando el usuario deja de hacer hover.
+    */
+    will-change: transform;
     transform: scale(1.015);
     box-shadow: var(--shadow-lg);
     border-color: transparent;
