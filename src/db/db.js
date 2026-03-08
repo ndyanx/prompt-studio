@@ -94,10 +94,19 @@ export function normalizeTask(raw) {
         ? raw.media.map((m) => ({
             url_post: m.url_post || "",
             url_video: m.url_video || "",
+            url_thumbnail: m.url_thumbnail || "",
             width: m.width || null,
             height: m.height || null,
           }))
-        : [{ url_post: "", url_video: "", width: null, height: null }],
+        : [
+            {
+              url_post: "",
+              url_video: "",
+              url_thumbnail: "",
+              width: null,
+              height: null,
+            },
+          ],
   };
 }
 
@@ -113,10 +122,19 @@ export class Task {
         ? data.media.map((m) => ({
             url_post: m.url_post || "",
             url_video: m.url_video || "",
+            url_thumbnail: m.url_thumbnail || "",
             width: m.width || null,
             height: m.height || null,
           }))
-        : [{ url_post: "", url_video: "", width: null, height: null }];
+        : [
+            {
+              url_post: "",
+              url_video: "",
+              url_thumbnail: "",
+              width: null,
+              height: null,
+            },
+          ];
     this.createdAt = data.createdAt || Date.now();
     this.updatedAt = data.updatedAt || Date.now();
   }

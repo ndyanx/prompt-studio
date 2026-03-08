@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 import { db, Task, initDB, normalizeTask, SYNC_OPERATIONS } from "../db/db";
 import { useSyncStore } from "../stores/useSyncStore";
+import { useAuthStore } from "../stores/useAuthStore";
 import { APP_EVENTS } from "../events/events";
 
 export const usePromptStore = defineStore("prompt", () => {
@@ -10,7 +11,13 @@ export const usePromptStore = defineStore("prompt", () => {
   const currentTask = ref(null);
   const promptText = ref("");
   const mediaList = ref([
-    { url_post: "", url_video: "", width: null, height: null },
+    {
+      url_post: "",
+      url_video: "",
+      url_thumbnail: "",
+      width: null,
+      height: null,
+    },
   ]);
   // true una vez que init() termina — App.vue muestra los paneles reales
   // solo cuando esto es true, previniendo CLS por datos asíncronos.
@@ -34,6 +41,7 @@ export const usePromptStore = defineStore("prompt", () => {
 
   // Referencia lazy al syncStore para evitar dependencia circular en imports.
   const getSync = () => useSyncStore();
+  const getAuth = () => useAuthStore();
 
   // ─── Helpers internos ─────────────────────────────────────────────────────
 
@@ -41,6 +49,7 @@ export const usePromptStore = defineStore("prompt", () => {
     mediaList.value.map((m) => ({
       url_post: m.url_post || "",
       url_video: m.url_video || "",
+      url_thumbnail: m.url_thumbnail || "",
       width: m.width || null,
       height: m.height || null,
     }));
@@ -150,11 +159,27 @@ export const usePromptStore = defineStore("prompt", () => {
         mediaList.value = updated.media.map((m) => ({ ...m }));
       }
     } else {
-      // La tarea activa fue eliminada desde otro dispositivo
+      // La tarea activa fue eliminada desde otro dispositivo/pestaña.
       if (tasks.value.length > 0) {
         await loadTask(tasks.value[0]);
       } else {
-        await createNewTask();
+        // No llamar createNewTask() aquí: si la pestaña que hizo el delete
+        // ya creó una tarea default, su INSERT llegará como otro evento
+        // REALTIME_CHANGE en breve y esta pestaña la cargará entonces.
+        // Llamar createNewTask() desde cada pestaña en paralelo genera tareas
+        // default duplicadas (una por pestaña abierta).
+        // Solo limpiar el estado local y esperar el próximo evento.
+        currentTask.value = null;
+        promptText.value = "";
+        mediaList.value = [
+          {
+            url_post: "",
+            url_video: "",
+            url_thumbnail: "",
+            width: null,
+            height: null,
+          },
+        ];
       }
     }
   };
@@ -162,13 +187,27 @@ export const usePromptStore = defineStore("prompt", () => {
   // ─── Limpiar datos al cerrar sesión ───────────────────────────────────────
 
   const clearLocalData = async () => {
-    // IndexedDB ya fue limpiado por useSyncStore en handleSignOut.
+    // Cancelar cualquier autosave pendiente antes de limpiar el estado.
+    // Sin esto, el debounce de 2s puede expirar después del clear y llamar
+    // persistCurrentTask() con currentTask ya nulo o con datos de la sesión
+    // anterior, escribiendo en una IndexedDB que acaba de ser limpiada.
+    if (saveTimeout) {
+      clearTimeout(saveTimeout);
+      saveTimeout = null;
+    }
+    // IndexedDB ya fue limpiado por useSyncStore antes de emitir SIGNED_OUT.
     // Aquí solo reseteamos el estado en memoria.
     tasks.value = [];
     currentTask.value = null;
     promptText.value = "";
     mediaList.value = [
-      { url_post: "", url_video: "", width: null, height: null },
+      {
+        url_post: "",
+        url_video: "",
+        url_thumbnail: "",
+        width: null,
+        height: null,
+      },
     ];
   };
 
@@ -199,10 +238,16 @@ export const usePromptStore = defineStore("prompt", () => {
         prompt: "Escribe tu prompt aquí.",
       });
 
-      await db.tasks.add(newTask);
+      // Sin sesión: la tarea default vive solo en memoria.
+      // Persistirla en IndexedDB causaría que múltiples pestañas la lean
+      // al recargar y cada una cree la suya → N tareas default duplicadas.
+      // Con sesión: persistir y sincronizar normalmente.
+      if (getAuth().isAuthenticated) {
+        await db.tasks.add(newTask);
+        getSync().syncTaskToSupabase(newTask, SYNC_OPERATIONS.UPSERT);
+      }
       tasks.value.unshift(newTask);
       await loadTask(newTask);
-      getSync().syncTaskToSupabase(newTask, SYNC_OPERATIONS.UPSERT);
 
       return newTask;
     } catch (error) {
@@ -220,7 +265,16 @@ export const usePromptStore = defineStore("prompt", () => {
     if (saveTimeout && currentTask.value) {
       clearTimeout(saveTimeout);
       saveTimeout = null;
-      await persistCurrentTask();
+      // Solo flushar si la tarea sigue existiendo en el array local.
+      // Si fue eliminada desde otra pestaña/dispositivo y este loadTask
+      // viene de handleRealtimeChange, persistCurrentTask() la resucitaría
+      // en IndexedDB y Supabase con un UPSERT posterior al DELETE.
+      const stillExists = tasks.value.some(
+        (t) => t.id === currentTask.value.id,
+      );
+      if (stillExists) {
+        await persistCurrentTask();
+      }
     }
 
     const normalized = normalizeTask(task);
@@ -239,6 +293,15 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const deleteTask = async (taskId) => {
     try {
+      // Cancelar autosave pendiente ANTES de borrar. Si la tarea a eliminar
+      // es currentTask y hay un debounce activo, expiraría después del delete
+      // y llamaría persistCurrentTask() → db.tasks.put() + syncTaskToSupabase(UPSERT),
+      // resucitando la tarea en IndexedDB y en Supabase.
+      if (saveTimeout && currentTask.value?.id === taskId) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+      }
+
       const taskToDelete = tasks.value.find((t) => t.id === taskId);
 
       await db.tasks.delete(taskId);
@@ -348,14 +411,37 @@ export const usePromptStore = defineStore("prompt", () => {
                 ? task.media.map((m) => ({
                     url_post: m.url_post || "",
                     url_video: m.url_video || "",
+                    url_thumbnail: m.url_thumbnail || "",
                     width: m.width || null,
                     height: m.height || null,
                   }))
-                : [{ url_post: "", url_video: "", width: null, height: null }],
+                : [
+                    {
+                      url_post: "",
+                      url_video: "",
+                      url_thumbnail: "",
+                      width: null,
+                      height: null,
+                    },
+                  ],
             createdAt: task.createdAt || Date.now(),
             updatedAt: task.updatedAt || Date.now(),
           }));
 
+          // Si solo hay una tarea y es la default vacía, eliminarla antes
+          // de importar para que no quede como basura entre las importadas.
+          if (tasks.value.length === 1) {
+            const only = tasks.value[0];
+            const isDefault =
+              only.prompt === "Escribe tu prompt aquí." &&
+              only.name === "Nueva Tarea" &&
+              only.media.every((m) => !m.url_post && !m.url_video);
+            if (isDefault) {
+              await db.tasks.delete(only.id);
+              tasks.value = [];
+              getSync().syncTaskToSupabase(only, SYNC_OPERATIONS.DELETE);
+            }
+          }
           // bulkPut (upsert) evita BulkError si Realtime escribe en paralelo.
           await db.tasks.bulkPut(newTasks);
           tasks.value.push(...newTasks);
@@ -382,10 +468,16 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const updateMediaSlot = async (
     index,
-    { url_post, url_video, width = null, height = null },
+    { url_post, url_video, url_thumbnail = "", width = null, height = null },
   ) => {
     if (index < 0 || index >= mediaList.value.length) return;
-    mediaList.value[index] = { url_post, url_video, width, height };
+    mediaList.value[index] = {
+      url_post,
+      url_video,
+      url_thumbnail,
+      width,
+      height,
+    };
     scheduleSave();
   };
 
@@ -393,6 +485,7 @@ export const usePromptStore = defineStore("prompt", () => {
     mediaList.value.push({
       url_post: "",
       url_video: "",
+      url_thumbnail: "",
       width: null,
       height: null,
     });

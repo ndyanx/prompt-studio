@@ -8,6 +8,7 @@ const props = defineProps({
     urlVideo: String,
     width: { type: Number, default: null },
     height: { type: Number, default: null },
+    urlThumbnail: { type: String, default: "" },
     isVisible: Boolean,
 });
 
@@ -109,7 +110,11 @@ const extractVideoUrl = async (postUrl) => {
             errorMessage.value =
                 "Este post no contiene un video. Solo se aceptan posts de video.";
             localUrlVideo.value = "";
-            emit("update-urls", { url_post: postUrl, url_video: "" });
+            emit("update-urls", {
+                url_post: postUrl,
+                url_video: "",
+                url_thumbnail: "",
+            });
             return;
         }
 
@@ -128,6 +133,7 @@ const extractVideoUrl = async (postUrl) => {
         emit("update-urls", {
             url_post: postUrl,
             url_video: videoUrl,
+            url_thumbnail: post.thumbnailImageUrl || "",
             width: post.width || post.resolution?.width || null,
             height: post.height || post.resolution?.height || null,
         });
@@ -137,7 +143,11 @@ const extractVideoUrl = async (postUrl) => {
             error.message ||
             "Error al extraer el video. Verifica la URL del post.";
         localUrlVideo.value = "";
-        emit("update-urls", { url_post: postUrl, url_video: "" });
+        emit("update-urls", {
+            url_post: postUrl,
+            url_video: "",
+            url_thumbnail: "",
+        });
     } finally {
         isLoading.value = false;
     }
@@ -155,6 +165,7 @@ const handleUrlInput = (event) => {
         emit("update-urls", {
             url_post: newUrl,
             url_video: localUrlVideo.value,
+            url_thumbnail: props.urlThumbnail,
             width: props.width,
             height: props.height,
         });

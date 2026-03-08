@@ -25,6 +25,7 @@ const allVideos = computed(() => {
                     taskName: task.name,
                     url_video: slot.url_video,
                     url_post: slot.url_post || "",
+                    url_thumbnail: slot.url_thumbnail || "",
                     slotIndex,
                     width: slot.width || null,
                     height: slot.height || null,
@@ -69,13 +70,26 @@ const scheduleProgressiveRender = () => {
     idleCallbackId = requestIdleCallback(tick, { timeout: 300 });
 };
 
-// Cuando cambia allVideos (nueva tarea añadida, etc.) reiniciamos
+// Cuando cambia allVideos (nueva tarea añadida, video nuevo, etc.) reiniciamos
 // renderedCount Y reconstruimos columnas desde cero en un solo watch.
 // isMounted evita que este watch pise el columnArrays construido en onMounted.
+//
+// IMPORTANTE: solo reconstruir si la lista de videos cambió estructuralmente
+// (distinto nº de items, distinto id/url en alguna posición).
+// Si llegó un REALTIME_CHANGE por un cambio de prompt/name en otra pestaña,
+// allVideos se recalcula pero tiene los mismos ids y urls → no parpadear.
+let prevVideoSignature = "";
+const getVideoSignature = (videos) =>
+    videos.map((v) => `${v.id}:${v.url_video}`).join("|");
+
 watch(
     allVideos,
-    () => {
+    (newVideos) => {
         if (!isMounted) return;
+        const sig = getVideoSignature(newVideos);
+        if (sig === prevVideoSignature) return; // solo cambió prompt/name, ignorar
+        prevVideoSignature = sig;
+
         if (idleCallbackId) cancelIdleCallback(idleCallbackId);
         renderedCount.value = INITIAL_RENDER;
         // Rebuild inmediato de las primeras INITIAL_RENDER cards
@@ -96,10 +110,11 @@ const getCardAspect = (video) => {
 };
 
 // ─── Metadata handler ─────────────────────────────────────────────────────
+// No llamamos play() aquí — el delay de 3s lo maneja schedulePlay.
+// loadedmetadata solo actualiza dimensiones para el aspect ratio.
 const handleMetadata = (e, video) => {
     const { videoWidth, videoHeight } = e.target;
     if (!videoWidth || !videoHeight) return;
-    e.target.play().catch(() => {});
     if (video.width && video.height) return;
     runtimeRatios.value[video.id] = videoWidth / videoHeight;
     promptStore.updateMediaDimensions(
@@ -184,6 +199,29 @@ const initResizeObserver = () => {
 const visibleMap = ref({});
 const videoEls = {};
 
+// playTimers: timers pendientes de reproducción { [id]: timeoutId }.
+// Si la tarjeta sale del viewport antes de los 1.5s, se cancela el timer
+// y el video no llega a reproducirse.
+const playTimers = {};
+const PLAY_DELAY = 2000;
+
+const schedulePlay = (id) => {
+    if (playTimers[id]) return; // ya hay un timer activo para este id
+    playTimers[id] = setTimeout(() => {
+        delete playTimers[id];
+        if (!modalVideo.value) {
+            videoEls[id]?.play().catch(() => {});
+        }
+    }, PLAY_DELAY);
+};
+
+const cancelPlay = (id) => {
+    if (playTimers[id]) {
+        clearTimeout(playTimers[id]);
+        delete playTimers[id];
+    }
+};
+
 const setCardRef = (el, id) => {
     if (el) intersectionObserver?.observe(el);
 };
@@ -213,14 +251,13 @@ const initIntersectionObserver = () => {
                         next[id] = true;
                         changed = true;
                     }
-                    if (!modalVideo.value) {
-                        videoEls[id]?.play().catch(() => {});
-                    }
+                    schedulePlay(id);
                 } else {
                     if (next[id]) {
                         delete next[id];
                         changed = true;
                     }
+                    cancelPlay(id);
                     videoEls[id]?.pause();
                 }
             });
@@ -345,6 +382,8 @@ onUnmounted(() => {
     resizeObserver?.disconnect();
     window.removeEventListener("keydown", handleKeydown);
     document.body.style.overflow = "";
+    // Cancelar todos los timers de reproducción pendientes
+    Object.keys(playTimers).forEach(cancelPlay);
 });
 </script>
 
@@ -404,14 +443,20 @@ onUnmounted(() => {
                         :ref="(el) => setVideoRef(el, video.id)"
                         class="gallery-video"
                         :src="video.url_video"
+                        :poster="video.url_thumbnail"
                         muted
                         loop
                         playsinline
-                        autoplay
                         preload="none"
                         @loadedmetadata="handleMetadata($event, video)"
                     />
-                    <div v-else class="video-placeholder" />
+                    <img
+                        v-else
+                        class="gallery-video"
+                        :src="video.url_thumbnail"
+                        :alt="video.taskName"
+                        loading="lazy"
+                    />
 
                     <div class="card-overlay">
                         <span class="card-task-name">{{ video.taskName }}</span>

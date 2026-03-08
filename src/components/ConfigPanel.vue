@@ -258,7 +258,8 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                             aria-label="Nombre de la tarea"
                             aria-multiline="false"
                             class="task-name-input"
-          cp                  :data-placeholder="'Nombre de la tarea'"
+                            cp
+                            :data-placeholder="'Nombre de la tarea'"
                             spellcheck="false"
                             @input="handleNameInput"
                             @keydown="handleNameKeydown"
@@ -328,6 +329,7 @@ const hasDuplicates = computed(() => duplicateCount.value > 1);
                 <VideoPreview
                     :url-post="slot.url_post"
                     :url-video="slot.url_video"
+                    :url-thumbnail="slot.url_thumbnail"
                     :width="slot.width"
                     :height="slot.height"
                     :is-visible="true"

@@ -10,6 +10,7 @@ import {
   removePendingSync,
 } from "../db/db";
 import { APP_EVENTS, emit } from "../events/events";
+import { tabCoordinator, TAB_MESSAGES } from "../sync/tabCoordinator";
 
 export const useSyncStore = defineStore("sync", () => {
   // ─── Estado ───────────────────────────────────────────────────────────────
@@ -23,10 +24,6 @@ export const useSyncStore = defineStore("sync", () => {
   let currentUserId = null;
   let isHandlingSignIn = false;
 
-  // IDs de tareas escritas por este dispositivo en Supabase.
-  // Permite ignorar el eco de Realtime y evitar el loop write → realtime → write.
-  // Fix #2: TTL de 10s — si el write falla antes del echo, el ID se auto-limpia
-  // y no bloquea updates legítimos del mismo ID en el futuro.
   const localWriteIds = new Set();
   const LOCAL_WRITE_TTL = 10_000;
   const addLocalWriteId = (id) => {
@@ -36,8 +33,6 @@ export const useSyncStore = defineStore("sync", () => {
 
   const hasPending = computed(() => pendingCount.value > 0);
 
-  // Fix #4: helper centralizado — loguea + puebla syncError para que la UI
-  // pueda mostrarlo. Se auto-limpia a los 5s para no bloquear la UI.
   let syncErrorTimer = null;
   const setSyncError = (msg, err) => {
     console.error(msg, err);
@@ -115,9 +110,6 @@ export const useSyncStore = defineStore("sync", () => {
 
   // ─── Flush cola offline ───────────────────────────────────────────────────
 
-  // Fix #5: backoff exponencial para reintentos de flush.
-  // Si Supabase falla, esperamos 1s → 2s → 4s → … hasta MAX_BACKOFF.
-  // Evita saturar la red cuando el servidor está caído.
   let flushBackoffDelay = 1000;
   const MAX_FLUSH_BACKOFF = 30_000;
   const resetFlushBackoff = () => {
@@ -125,6 +117,9 @@ export const useSyncStore = defineStore("sync", () => {
   };
 
   const flushPendingQueue = async () => {
+    // Solo la pestaña líder ejecuta el flush — evita escrituras triplicadas.
+    if (!tabCoordinator.isLeader) return;
+
     const session = await getSession();
     if (!session || isOffline.value) return;
 
@@ -165,10 +160,9 @@ export const useSyncStore = defineStore("sync", () => {
             if (error) throw error;
           }
           await removePendingSync(item.id);
-          resetFlushBackoff(); // operación exitosa — resetear backoff
+          resetFlushBackoff();
         } catch (error) {
           setSyncError("Error en flush de cola offline", error);
-          // Backoff exponencial: programar reintento y abortar el loop actual
           const delay = flushBackoffDelay;
           flushBackoffDelay = Math.min(
             flushBackoffDelay * 2,
@@ -182,56 +176,28 @@ export const useSyncStore = defineStore("sync", () => {
       await refreshPendingCount();
       lastSyncTime.value = new Date().toISOString();
       isSyncingNow.value = false;
+      tabCoordinator.broadcast(TAB_MESSAGES.FLUSH_DONE);
     }
   };
 
   // ─── Borrar todas las tareas del usuario en Supabase ─────────────────────
-  // No usa syncTaskToSupabase en loop porque ese lee de IndexedDB, que puede
-  // estar incompleto si el usuario usó la app antes del fix de paginación.
-  // En su lugar pagina los IDs directamente desde Supabase y borra en batches.
+
   const deleteAllFromSupabase = async () => {
     const session = await getSession();
     if (!session) return;
 
-    const PAGE_SIZE = 1000;
-    let from = 0;
+    const { error } = await supabase
+      .from("tasks")
+      .delete()
+      .eq("user_id", session.user.id);
 
-    while (true) {
-      // Traer solo los IDs — más liviano que traer filas completas
-      const { data, error } = await supabase
-        .from("tasks")
-        .select("id")
-        .eq("user_id", session.user.id)
-        .range(from, from + PAGE_SIZE - 1);
-
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-
-      const ids = data.map((r) => r.id);
-
-      // Borrar el batch en una sola query usando .in()
-      const { error: deleteError } = await supabase
-        .from("tasks")
-        .delete()
-        .in("id", ids)
-        .eq("user_id", session.user.id);
-
-      if (deleteError) throw deleteError;
-
-      if (data.length < PAGE_SIZE) break;
-      from += PAGE_SIZE;
-    }
+    if (error) throw error;
   };
 
   const loadTasksFromSupabase = async (userId) => {
     try {
-      unsubscribeFromRealtime(); // ← pausar antes del clear
+      unsubscribeFromRealtime();
 
-      // Supabase limita a 1000 filas por query por defecto.
-      // Con más de 1000 tareas, un .select() sin paginación trunca silenciosamente
-      // los resultados → loadTasksFromSupabase hace db.tasks.clear() y solo
-      // restaura las 1000 más recientes, perdiendo el resto permanentemente.
-      // La solución es paginar con .range() hasta agotar los resultados.
       const PAGE_SIZE = 1000;
       let from = 0;
       let allRows = [];
@@ -248,7 +214,6 @@ export const useSyncStore = defineStore("sync", () => {
 
         allRows.push(...data);
 
-        // Si la página devolvió menos filas que PAGE_SIZE, es la última
         if (data.length < PAGE_SIZE) break;
         from += PAGE_SIZE;
       }
@@ -256,8 +221,30 @@ export const useSyncStore = defineStore("sync", () => {
       await db.tasks.clear();
       await db.pendingSync.clear();
 
-      if (allRows.length > 0) {
-        const normalized = allRows.map((row) =>
+      // Filtrar tareas default que se subieron a Supabase antes de que
+      // createNewTask tuviera el guard de sesión — son basura acumulada.
+      const DEFAULT_PROMPT = "Escribe tu prompt aquí.";
+      const DEFAULT_NAME = "Nueva Tarea";
+      const cleanRows = allRows.filter((row) => {
+        const isDefault =
+          row.name === DEFAULT_NAME &&
+          row.prompt === DEFAULT_PROMPT &&
+          (!row.media ||
+            (Array.isArray(row.media) &&
+              row.media.every((m) => !m.url_post && !m.url_video)));
+        if (isDefault) {
+          // Borrar en background — no bloquear la carga
+          supabase
+            .from("tasks")
+            .delete()
+            .eq("id", row.id)
+            .then(() => {});
+        }
+        return !isDefault;
+      });
+
+      if (cleanRows.length > 0) {
+        const normalized = cleanRows.map((row) =>
           normalizeTask({
             id: row.id,
             name: row.name,
@@ -267,8 +254,6 @@ export const useSyncStore = defineStore("sync", () => {
             updatedAt: row.updated_at,
           }),
         );
-        // bulkPut (upsert) evita BulkError si Realtime o promptStore escribieron
-        // entre el clear() y esta línea.
         await db.tasks.bulkPut(normalized);
         return { success: true, count: normalized.length };
       }
@@ -281,7 +266,14 @@ export const useSyncStore = defineStore("sync", () => {
 
   // ─── Realtime ─────────────────────────────────────────────────────────────
 
+  /**
+   * Solo la pestaña líder abre el WebSocket con Supabase Realtime.
+   * Cuando recibe un cambio lo aplica en su IndexedDB y lo reenvía a las demás
+   * pestañas via BroadcastChannel → de N WebSockets se pasa a 1.
+   */
   const subscribeToRealtime = (userId) => {
+    if (!tabCoordinator.isLeader) return;
+
     unsubscribeFromRealtime();
     realtimeChannel = supabase
       .channel(`tasks:${userId}`)
@@ -295,6 +287,9 @@ export const useSyncStore = defineStore("sync", () => {
         },
         async (payload) => {
           await handleRealtimeChange(payload);
+          tabCoordinator.broadcast(TAB_MESSAGES.REALTIME_FORWARDED, {
+            payload,
+          });
         },
       )
       .subscribe();
@@ -313,8 +308,6 @@ export const useSyncStore = defineStore("sync", () => {
     old: oldRow,
   }) => {
     try {
-      // Ignorar cambios originados por este dispositivo para evitar el loop
-      // write → Realtime → write.
       const changedId = eventType === "DELETE" ? oldRow?.id : newRow?.id;
       if (changedId && localWriteIds.has(changedId)) {
         localWriteIds.delete(changedId);
@@ -322,7 +315,6 @@ export const useSyncStore = defineStore("sync", () => {
       }
 
       if (eventType === "DELETE") {
-        // Sin REPLICA IDENTITY FULL, Supabase solo envía la PK en oldRow.
         if (!oldRow?.id) {
           console.warn("Realtime DELETE recibido sin id en oldRow — ignorado");
           return;
@@ -347,7 +339,10 @@ export const useSyncStore = defineStore("sync", () => {
 
   // ─── Auth handlers ────────────────────────────────────────────────────────
 
-  const handleSignIn = async () => {
+  // Carga datos del usuario autenticado. Si broadcastSignIn=true, notifica
+  // a otras pestañas para que recarguen (solo cuando el login ocurrió ahora,
+  // no en la carga inicial donde la sesión ya existía).
+  const _loadSession = async (broadcastSignIn = false) => {
     if (isHandlingSignIn) return;
     isHandlingSignIn = true;
     try {
@@ -355,24 +350,41 @@ export const useSyncStore = defineStore("sync", () => {
       if (!session) return;
       currentUserId = session.user.id;
 
-      const result = await loadTasksFromSupabase(currentUserId);
-      emit(
-        result.success && result.count > 0
-          ? APP_EVENTS.DATA_RESTORED
-          : APP_EVENTS.CREATE_DEFAULT_TASK,
-      );
+      if (broadcastSignIn) {
+        tabCoordinator.broadcast(TAB_MESSAGES.SIGNED_IN);
+      }
 
+      const result = await loadTasksFromSupabase(currentUserId);
+      // Solo emitir cuando el login fue activo (broadcastSignIn=true).
+      // En carga inicial (false), promptStore.init() llama loadTasks()
+      // directamente justo después — el emit sería redundante y podría
+      // disparar una segunda loadTasks() con datos inconsistentes.
+      if (broadcastSignIn) {
+        emit(
+          result.success && result.count > 0
+            ? APP_EVENTS.DATA_RESTORED
+            : APP_EVENTS.CREATE_DEFAULT_TASK,
+        );
+      }
       subscribeToRealtime(currentUserId);
       await refreshPendingCount();
     } catch (error) {
-      setSyncError("Error en handleSignIn", error);
-      emit(APP_EVENTS.CREATE_DEFAULT_TASK);
+      setSyncError("Error en sign-in", error);
+      // Solo crear tarea default si fue login activo — en carga inicial
+      // promptStore.init() manejará el estado vacío directamente.
+      if (broadcastSignIn) emit(APP_EVENTS.CREATE_DEFAULT_TASK);
     } finally {
       isHandlingSignIn = false;
     }
   };
 
+  // Llamado por useAuthStore cuando el usuario hace login activamente.
+  const handleSignIn = () => _loadSession(true);
+
   const handleSignOut = async () => {
+    // Notificar a otras pestañas primero — ellas harán location.reload().
+    tabCoordinator.broadcast(TAB_MESSAGES.SIGNED_OUT);
+    // Limpiar estado local de esta pestaña.
     unsubscribeFromRealtime();
     currentUserId = null;
     await db.tasks.clear();
@@ -381,7 +393,10 @@ export const useSyncStore = defineStore("sync", () => {
     isSyncingNow.value = false;
     lastSyncTime.value = null;
     pendingCount.value = 0;
-    emit(APP_EVENTS.DATA_RESTORED);
+    // Recargar esta pestaña también — igual que las otras.
+    // Evita la race condition donde esta pestaña crea una tarea default en
+    // IndexedDB mientras la otra pestaña también recarga y crea la suya.
+    window.location.reload();
   };
 
   // ─── Conectividad ─────────────────────────────────────────────────────────
@@ -389,30 +404,68 @@ export const useSyncStore = defineStore("sync", () => {
   const handleOnline = async () => {
     isOffline.value = false;
     syncError.value = null;
-    await flushPendingQueue();
+    await flushPendingQueue(); // guard interno: solo corre si isLeader
   };
 
   const handleOffline = () => {
     isOffline.value = true;
   };
 
+  // ─── Listeners de BroadcastChannel ───────────────────────────────────────
+
+  const initBroadcastListeners = () => {
+    // Pestaña no-líder recibe cambio de Realtime reenviado por la líder
+    tabCoordinator.on(TAB_MESSAGES.REALTIME_FORWARDED, async ({ payload }) => {
+      if (tabCoordinator.isLeader) return;
+      await handleRealtimeChange(payload);
+    });
+
+    // Otra pestaña tomó el liderazgo — cerrar nuestro WebSocket si lo teníamos
+    tabCoordinator.on(TAB_MESSAGES.LEADER_ACK, ({ tabId }) => {
+      if (tabId !== tabCoordinator.tabId && realtimeChannel) {
+        unsubscribeFromRealtime();
+      }
+    });
+
+    // Cuando otra pestaña inicia sesión, recargar para obtener estado limpio.
+    tabCoordinator.on(TAB_MESSAGES.SIGNED_IN, () => {
+      window.location.reload();
+    });
+
+    // Cuando otra pestaña cierra sesión, recargar esta página.
+    // Es la solución más simple y confiable: evita coordinar la limpieza
+    // de stores async y garantiza un estado 100% limpio tras el logout.
+    tabCoordinator.on(TAB_MESSAGES.SIGNED_OUT, () => {
+      window.location.reload();
+    });
+  };
+
   // ─── Init / Cleanup ───────────────────────────────────────────────────────
 
   const initSync = async () => {
+    tabCoordinator.init();
+    // Elegir líder antes de cualquier operación que use isLeader.
+    // Sin esta llamada, isLeader siempre es false y subscribeToRealtime
+    // nunca abre el WebSocket → realtime nunca funciona.
+    tabCoordinator.electLeader();
+    initBroadcastListeners();
+
     isOffline.value = !navigator.onLine;
     const session = await getSession();
 
     if (session) {
       currentUserId = session.user.id;
-      await handleSignIn();
+      await _loadSession(false); // sesión existente al cargar — no broadcastear
     } else {
       await db.pendingSync.clear();
       await refreshPendingCount();
-      const count = await db.tasks.count();
-      if (count === 0) emit(APP_EVENTS.CREATE_DEFAULT_TASK);
+      // No emitir CREATE_DEFAULT_TASK aquí — promptStore.init() llama
+      // loadTasks() justo después y crea la default si la DB está vacía.
     }
 
     window.addEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
+    // APP_EVENTS.SIGNED_OUT llega del DOM local (emitido por useAuthStore.signOut).
+    // Llamamos handleSignOut para que broadcastee a las otras pestañas.
     window.addEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
@@ -420,6 +473,7 @@ export const useSyncStore = defineStore("sync", () => {
 
   const cleanup = () => {
     unsubscribeFromRealtime();
+    tabCoordinator.destroy();
     window.removeEventListener(APP_EVENTS.SIGNED_IN, handleSignIn);
     window.removeEventListener(APP_EVENTS.SIGNED_OUT, handleSignOut);
     window.removeEventListener("online", handleOnline);
